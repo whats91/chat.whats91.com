@@ -1,10 +1,36 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { Logger } from '@/lib/logger';
 
 const log = new Logger('VersionAPI');
+
+function findGitRoot(startDir: string): string | null {
+  let currentDir = startDir;
+
+  while (true) {
+    if (fs.existsSync(path.join(currentDir, '.git'))) {
+      return currentDir;
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+
+    currentDir = parentDir;
+  }
+}
+
+function runGit(args: string[], cwd: string): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 1000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
 
 /**
  * GET /api/version
@@ -47,12 +73,17 @@ export async function GET() {
       branch: 'unknown',
     };
     
-    try {
-      git.commit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', timeout: 1000 }).trim();
-      git.branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8', timeout: 1000 }).trim();
-    } catch {
-      // Git not available or not a git repo - this is expected in production standalone builds
-      log.debug('Git info not available (expected in production standalone)');
+    const gitRoot = findGitRoot(cwd);
+    if (gitRoot) {
+      try {
+        git.commit = runGit(['rev-parse', '--short', 'HEAD'], gitRoot);
+        git.branch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], gitRoot);
+      } catch {
+        log.debug('Git info not available', { cwd: gitRoot });
+      }
+    } else {
+      // This is expected in production standalone builds.
+      log.debug('Git metadata skipped because no .git directory was found', { cwd });
     }
     
     log.info('Version request', { version, source: versionSource, commit: git.commit });
