@@ -10,24 +10,12 @@ import type {
   SendMessageRequest,
   SendMessageResponse
 } from '@/lib/types/chat';
+import { getCurrentUserId } from '@/lib/config/current-user';
 
 const API_BASE = '/api';
 
-// Get current user ID from localStorage or session
 function getUserId(): string {
-  if (typeof window !== 'undefined') {
-    // Try to get from localStorage
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        return user.id || '1';
-      } catch {
-        return '1';
-      }
-    }
-  }
-  return '1';
+  return getCurrentUserId();
 }
 
 // Default headers including user ID

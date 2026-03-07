@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
 
 /**
@@ -17,8 +18,7 @@ export async function GET(
     const { id } = await params;
     const searchParams = request.nextUrl.searchParams;
     
-    // TODO: Get userId from auth session
-    const userId = request.headers.get('x-user-id') || '1';
+    const userId = getCurrentUserId();
     
     const result = await conversationController.getConversationById({
       conversationId: parseInt(id),
@@ -41,14 +41,13 @@ export async function GET(
 
 // DELETE - Delete conversation
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
     
-    // TODO: Get userId from auth session
-    const userId = request.headers.get('x-user-id') || '1';
+    const userId = getCurrentUserId();
     
     const result = await conversationController.delete(parseInt(id), userId);
     

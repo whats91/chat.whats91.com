@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
 
 /**
@@ -20,9 +21,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     
-    // TODO: Get userId from auth session
-    // For now, use a placeholder or from headers
-    const userId = request.headers.get('x-user-id') || '1';
+    const userId = getCurrentUserId();
     
     const result = await conversationController.getConversations({
       userId,

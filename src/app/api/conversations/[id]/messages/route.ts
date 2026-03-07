@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
 import type { SendMessageRequest } from '@/lib/types/chat';
 
@@ -17,8 +18,7 @@ export async function POST(
     const { id } = await params;
     const body: SendMessageRequest = await request.json();
     
-    // TODO: Get userId from auth session
-    const userId = request.headers.get('x-user-id') || '1';
+    const userId = getCurrentUserId();
     
     // Validate required fields
     if (!body.messageType) {

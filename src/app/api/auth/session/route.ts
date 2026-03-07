@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getCurrentUserId } from '@/lib/config/current-user';
 
 /**
  * Auth Session Route Handler
@@ -15,7 +16,7 @@ export async function GET() {
   return NextResponse.json({
     authenticated: true,
     user: {
-      id: 'user-1',
+      id: getCurrentUserId(),
       name: 'Demo User',
       email: 'demo@whats91.com',
       tenantId: 'tenant-1',
