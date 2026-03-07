@@ -1,0 +1,213 @@
+// ========================================
+// WHATS91 CHAT - PRISMA SCHEMA
+// ========================================
+// Development: SQLite (default)
+// Production: MySQL (set DATABASE_URL=mysql://...)
+// ========================================
+// IMPORTANT: DATABASE SAFETY POLICY
+// ========================================
+// This project does NOT use automatic migrations.
+// All schema changes must be made manually via phpMyAdmin.
+// 
+// REMOVED COMMANDS (to prevent data loss):
+// - npm run db:push    (would modify schema automatically)
+// - npm run db:migrate (would run migrations)
+// - npm run db:reset   (would DELETE ALL DATA!)
+//
+// SAFE COMMANDS:
+// - npm run db:generate (generates Prisma Client types)
+// - npm run db:studio   (opens database GUI viewer)
+// ========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ========================================
+// MAIN DATABASE
+// ========================================
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// USER MODEL
+// ========================================
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  phone     String?
+  avatar    String?
+  status    String   @default("active")
+  role      String   @default("user")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  cloudApiSetups CloudApiSetup[]
+  contacts       Contact[]
+
+  @@map("users")
+}
+
+// ========================================
+// CONTACT MODEL
+// ========================================
+
+model Contact {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  phone     String
+  firstName String?  @map("first_name")
+  lastName  String?  @map("last_name")
+  email     String?
+  company   String?
+  notes     String?
+  tags      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, phone])
+  @@map("contacts")
+}
+
+// ========================================
+// CLOUD API SETUP MODEL
+// ========================================
+
+model CloudApiSetup {
+  id                          Int       @id @default(autoincrement())
+  uid                         String    @unique @default(uuid())
+  userId                      Int       @map("user_id")
+  
+  facebookAppId               String?   @map("facebook_app_id")
+  whatsappAccessToken         String?   @map("whatsapp_access_token")
+  whatsappBusinessAccountId   String?   @map("whatsapp_business_account_id")
+  phoneNumber                 String?   @map("phone_number")
+  phoneNumberId               String?   @map("phone_number_id")
+  
+  webhookVerifiedAt           DateTime? @map("webhook_verified_at")
+  embeddedSetupDoneAt         DateTime? @map("embedded_setup_done_at")
+  
+  accessChats                 Boolean   @default(false) @map("access_chats")
+  
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @updatedAt @map("updated_at")
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("cloud_api_setup")
+}
+
+// ========================================
+// CLOUD API REPORT MODEL
+// ========================================
+
+model CloudApiReport {
+  id           Int       @id @default(autoincrement())
+  userId       Int       @map("user_id")
+  messageId    String?   @map("message_id")
+  receiverId   String?   @map("receiver_id")
+  status       String    @default("pending")
+  errorCode    String?   @map("error_code")
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId, status])
+  @@map("cloud_api_reports")
+}
+
+// ========================================
+// CONVERSATION MODEL
+// ========================================
+
+model Conversation {
+  id                    Int       @id @default(autoincrement())
+  userId                Int       @map("user_id")
+  contactPhone          String    @map("contact_phone")
+  contactId             Int?      @map("contact_id")
+  contactName           String?   @map("contact_name")
+  whatsappPhoneNumberId String    @map("whatsapp_phone_number_id")
+  
+  lastMessageId         String?   @map("last_message_id")
+  lastMessageContent    String?   @map("last_message_content")
+  lastMessageType       String?   @map("last_message_type")
+  lastMessageAt         DateTime? @map("last_message_at")
+  lastMessageDirection  String?   @map("last_message_direction")
+  
+  unreadCount           Int       @default(0) @map("unread_count")
+  totalMessages         Int       @default(0) @map("total_messages")
+  
+  isArchived            Boolean   @default(false) @map("is_archived")
+  isPinned              Boolean   @default(false) @map("is_pinned")
+  isMuted               Boolean   @default(false) @map("is_muted")
+  status                String    @default("active")
+  
+  metaData              String?   @map("meta_data")
+  
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  messages              ConversationMessage[]
+
+  @@index([userId, contactPhone])
+  @@index([userId, lastMessageAt])
+  @@map("conversations")
+}
+
+// ========================================
+// CONVERSATION MESSAGE MODEL
+// ========================================
+
+model ConversationMessage {
+  id                 Int       @id @default(autoincrement())
+  conversationId     Int       @map("conversation_id")
+  whatsappMessageId  String    @unique @map("whatsapp_message_id")
+  
+  fromPhone          String    @map("from_phone")
+  toPhone            String    @map("to_phone")
+  
+  direction          String
+  messageType        String    @map("message_type")
+  messageContent     String?   @map("message_content")
+  
+  mediaUrl           String?   @map("media_url")
+  mediaMimeType      String?   @map("media_mime_type")
+  mediaFilename      String?   @map("media_filename")
+  mediaCaption       String?   @map("media_caption")
+  
+  status             String    @default("pending")
+  isRead             Boolean   @default(false) @map("is_read")
+  readAt             DateTime? @map("read_at")
+  
+  repliedToMessageId String?   @map("replied_to_message_id")
+  
+  interactiveData    String?   @map("interactive_data")
+  locationData       String?   @map("location_data")
+  contactData        String?   @map("contact_data")
+  
+  timestamp          DateTime
+  
+  errorMessage       String?   @map("error_message")
+  
+  webhookData        String?   @map("webhook_data")
+  outgoingPayload    String?   @map("outgoing_payload")
+  incomingPayload    String?   @map("incoming_payload")
+  
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, timestamp])
+  @@index([whatsappMessageId])
+  @@map("conversation_messages")
+}

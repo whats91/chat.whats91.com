@@ -1,0 +1,173 @@
+// ========================================
+// WHATS91 CHAT - CONVERSATIONS DATABASE SCHEMA
+// ========================================
+// This is a separate schema for the conversations database
+// Used for: Conversations, ConversationMessages, MediaStorage
+// 
+// NOTE: To use this schema, you need to run:
+// npx prisma db push --schema=prisma/schema-conversations.prisma
+// ========================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client-conversations"
+}
+
+datasource conversations {
+  provider = "mysql"
+  url      = env("CONVERSATIONS_DATABASE_URL")
+}
+
+// ========================================
+// CONVERSATION MODEL
+// ========================================
+
+model Conversation {
+  id                    Int       @id @default(autoincrement())
+  userId                BigInt    @map("user_id")
+  contactPhone          String    @map("contact_phone") @db.VarChar(25)
+  contactId             BigInt?   @map("contact_id")
+  contactName           String?   @map("contact_name")
+  whatsappPhoneNumberId String    @map("whatsapp_phone_number_id")
+  
+  // Last Message Info
+  lastMessageId         String?   @map("last_message_id")
+  lastMessageContent    String?   @map("last_message_content") @db.Text
+  lastMessageType       String?   @map("last_message_type")
+  lastMessageAt         DateTime? @map("last_message_at")
+  lastMessageDirection  String?   @map("last_message_direction") // inbound, outbound
+  
+  // Stats
+  unreadCount           Int       @default(0) @map("unread_count")
+  totalMessages         Int       @default(0) @map("total_messages")
+  
+  // Status Flags
+  isArchived            Boolean   @default(false) @map("is_archived")
+  isPinned              Boolean   @default(false) @map("is_pinned")
+  isMuted               Boolean   @default(false) @map("is_muted")
+  status                String    @default("active") // active, closed, blocked
+  
+  // Metadata
+  metaData              Json?     @map("meta_data")
+  
+  // Timestamps
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  messages              ConversationMessage[]
+
+  @@index([userId, contactPhone])
+  @@index([userId, lastMessageAt])
+  @@index([whatsappPhoneNumberId])
+  @@index([contactId])
+  @@map("conversations")
+}
+
+// ========================================
+// CONVERSATION MESSAGE MODEL
+// ========================================
+
+model ConversationMessage {
+  id                  Int       @id @default(autoincrement())
+  conversationId      Int       @map("conversation_id")
+  whatsappMessageId   String    @unique @map("whatsapp_message_id")
+  
+  // Phone Numbers
+  fromPhone           String    @map("from_phone") @db.VarChar(25)
+  toPhone             String    @map("to_phone") @db.VarChar(25)
+  
+  // Message Details
+  direction           String    // inbound, outbound
+  messageType         String    @map("message_type") // text, image, video, audio, document, etc.
+  messageContent      String?   @map("message_content") @db.Text
+  
+  // Media
+  mediaUrl            String?   @map("media_url")
+  mediaMimeType       String?   @map("media_mime_type")
+  mediaFilename       String?   @map("media_filename")
+  mediaCaption        String?   @map("media_caption") @db.Text
+  
+  // Status
+  status              String    @default("pending") // pending, sent, delivered, read, failed
+  isRead              Boolean   @default(false) @map("is_read")
+  readAt              DateTime? @map("read_at")
+  
+  // Reply/Forward
+  repliedToMessageId  String?   @map("replied_to_message_id")
+  forwardedFrom       String?   @map("forwarded_from")
+  
+  // Rich Content
+  interactiveData     Json?     @map("interactive_data")
+  locationData        Json?     @map("location_data")
+  contactData         Json?     @map("contact_data")
+  
+  // Timestamp
+  timestamp           DateTime
+  
+  // Error
+  errorMessage        String?   @map("error_message") @db.Text
+  
+  // Raw Payloads (IMPORTANT: Keep for rendering)
+  webhookData         Json?     @map("webhook_data")
+  outgoingPayload     Json?     @map("outgoing_payload")
+  incomingPayload     Json?     @map("incoming_payload")
+  
+  // Relations
+  conversation        Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  mediaStorage        MediaStorage[]
+  
+  // Timestamps
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([conversationId, timestamp])
+  @@index([whatsappMessageId])
+  @@index([fromPhone])
+  @@index([toPhone])
+  @@index([direction, status])
+  @@map("conversation_messages")
+}
+
+// ========================================
+// MEDIA STORAGE MODEL
+// ========================================
+
+model MediaStorage {
+  id                Int      @id @default(autoincrement())
+  userId            BigInt   @map("user_id")
+  messageId         String   @map("message_id") // Can be pending token or message ID
+  wasabiPath        String   @map("wasabi_path")
+  mimeType          String?  @map("mime_type")
+  fileSize          Int?     @map("file_size")
+  originalFilename  String?  @map("original_filename")
+  
+  // Relations
+  conversationMessage ConversationMessage? @relation(fields: [messageId], references: [whatsappMessageId])
+  
+  // Timestamps
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([messageId])
+  @@map("media_storage")
+}
+
+// ========================================
+// MESSAGE REACTION MODEL
+// ========================================
+
+model MessageReaction {
+  id                Int       @id @default(autoincrement())
+  messageId         String    @map("message_id")
+  conversationId    Int       @map("conversation_id")
+  reaction          String    // emoji
+  fromPhone         String    @map("from_phone") @db.VarChar(25)
+  timestamp         DateTime
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([messageId])
+  @@index([conversationId])
+  @@map("message_reactions")
+}

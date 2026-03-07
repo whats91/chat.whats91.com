@@ -1,0 +1,875 @@
+/**
+ * Conversation Controller
+ * 
+ * Main HTTP controller for the chat module.
+ * Handles all conversation and message operations.
+ * 
+ * Routes:
+ * - GET  /api/conversations - Get conversation list
+ * - GET  /api/conversations/:id - Get conversation with messages
+ * - POST /api/conversations/:id/messages - Send a message
+ * - POST /api/conversations/:id/read - Mark as read
+ * - PATCH /api/conversations/:id/archive - Toggle archive
+ * - PATCH /api/conversations/:id/pin - Toggle pin
+ * - DELETE /api/conversations/:id - Delete conversation
+ */
+
+import 'server-only';
+import { db } from '@/lib/db';
+import type { 
+  ConversationListItem,
+  Message,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+  SendMessageRequest 
+} from '@/lib/types/chat';
+import { 
+  sendMessageToMeta, 
+  normalizeConversationPhone, 
+  mapConversationMessageStatus 
+} from '../whatsapp/message-sender';
+import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
+import { Logger } from '@/lib/logger';
+
+const log = new Logger('ConversationCtrl');
+
+// ========================================
+// HELPER FUNCTIONS
+// ========================================
+
+/**
+ * Format relative time
+ */
+function formatTimeAgo(date: Date | null): string {
+  if (!date) return '';
+  
+  const now = new Date();
+  const diffMs = now.getTime() - new Date(date).getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return new Date(date).toLocaleDateString();
+}
+
+/**
+ * Get display name for a conversation
+ */
+function getDisplayName(contactName: string | null, contactPhone: string): string {
+  if (contactName) return contactName;
+  return `+${contactPhone}`;
+}
+
+/**
+ * Get preview text for a message based on type
+ */
+function getPreviewText(messageType: string, content: string | null): string {
+  if (content) return content;
+  
+  const previews: Record<string, string> = {
+    image: '📷 Photo',
+    video: '🎥 Video',
+    audio: '🎵 Audio',
+    document: '📄 Document',
+    location: '📍 Location',
+    contacts: '👤 Contact',
+    sticker: '😀 Sticker',
+    interactive: '💬 Interactive',
+    template: '📝 Template',
+  };
+  
+  return previews[messageType] || 'Message';
+}
+
+// ========================================
+// CONVERSATION LIST
+// ========================================
+
+export interface GetConversationsParams {
+  userId: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  archived?: boolean;
+  unreadOnly?: boolean;
+}
+
+export async function getConversations({
+  userId,
+  page = 1,
+  limit = 20,
+  search,
+  status = 'active',
+  archived = false,
+  unreadOnly = false,
+}: GetConversationsParams) {
+  try {
+    const offset = (page - 1) * limit;
+    
+    // Build the SQL query
+    let sql = `
+      SELECT 
+        id, contact_phone, contact_name, whatsapp_phone_number_id,
+        last_message_id, last_message_content, last_message_type,
+        last_message_at, last_message_direction, unread_count,
+        total_messages, is_archived, is_pinned, is_muted, status,
+        created_at, updated_at
+      FROM conversations
+      WHERE user_id = ?
+    `;
+    
+    const params: unknown[] = [userId];
+    
+    // Add filters
+    if (search) {
+      sql += ` AND (contact_name LIKE ? OR contact_phone LIKE ? OR last_message_content LIKE ?)`;
+      const searchPattern = `%${search}%`;
+      params.push(searchPattern, searchPattern, searchPattern);
+    }
+    
+    if (status !== 'all') {
+      sql += ` AND status = ?`;
+      params.push(status);
+    }
+    
+    if (archived) {
+      sql += ` AND is_archived = true`;
+    } else {
+      sql += ` AND is_archived = false`;
+    }
+    
+    if (unreadOnly) {
+      sql += ` AND unread_count > 0`;
+    }
+    
+    // Add ordering and pagination
+    sql += ` ORDER BY is_pinned DESC, last_message_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+    
+    // Execute query
+    const conversations = await db.$queryRawUnsafe(sql, ...params) as any[];
+    
+    // Get total count
+    let countSql = `SELECT COUNT(*) as total FROM conversations WHERE user_id = ?`;
+    const countParams: unknown[] = [userId];
+    
+    if (search) {
+      countSql += ` AND (contact_name LIKE ? OR contact_phone LIKE ? OR last_message_content LIKE ?)`;
+      const searchPattern = `%${search}%`;
+      countParams.push(searchPattern, searchPattern, searchPattern);
+    }
+    
+    if (status !== 'all') {
+      countSql += ` AND status = ?`;
+      countParams.push(status);
+    }
+    
+    if (archived) {
+      countSql += ` AND is_archived = true`;
+    } else {
+      countSql += ` AND is_archived = false`;
+    }
+    
+    const [countResult] = await db.$queryRawUnsafe(countSql, ...countParams) as any[];
+    const totalItems = countResult?.total || 0;
+    
+    // Format response
+    const formattedConversations: ConversationListItem[] = conversations.map(conv => ({
+      id: conv.id,
+      contactPhone: conv.contact_phone,
+      contactName: conv.contact_name,
+      displayName: getDisplayName(conv.contact_name, conv.contact_phone),
+      lastMessageContent: conv.last_message_content 
+        ? getPreviewText(conv.last_message_type, conv.last_message_content)
+        : null,
+      lastMessageType: conv.last_message_type,
+      lastMessageDirection: conv.last_message_direction,
+      lastMessageAt: conv.last_message_at,
+      lastMessageTimeAgo: formatTimeAgo(conv.last_message_at),
+      unreadCount: conv.unread_count || 0,
+      isPinned: conv.is_pinned || false,
+      isArchived: conv.is_archived || false,
+      isMuted: conv.is_muted || false,
+      status: conv.status,
+    }));
+    
+    // Get unread count summary
+    const [unreadResult] = await db.$queryRawUnsafe(
+      `SELECT COUNT(*) as count FROM conversations WHERE user_id = ? AND unread_count > 0 AND is_archived = false`,
+      userId
+    ) as any[];
+    
+    return {
+      success: true,
+      message: 'Conversations retrieved successfully',
+      data: {
+        conversations: formattedConversations,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalItems / limit),
+          totalItems,
+          itemsPerPage: limit,
+          hasNextPage: page * limit < totalItems,
+          hasPrevPage: page > 1,
+        },
+        summary: {
+          totalConversations: totalItems,
+          unreadConversations: unreadResult?.count || 0,
+        },
+      },
+    };
+  } catch (error) {
+    log.error('getConversations error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to retrieve conversations',
+      data: { conversations: [], pagination: {}, summary: {} },
+    };
+  }
+}
+
+// ========================================
+// GET CONVERSATION BY ID
+// ========================================
+
+export interface GetConversationParams {
+  conversationId: number;
+  userId: string;
+  page?: number;
+  limit?: number;
+  beforeMessageId?: string;
+}
+
+export async function getConversationById({
+  conversationId,
+  userId,
+  page = 1,
+  limit = 50,
+}: GetConversationParams) {
+  try {
+    // Get conversation
+    const [conversation] = await db.$queryRawUnsafe(
+      `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
+      conversationId, userId
+    ) as any[];
+    
+    if (!conversation) {
+      return {
+        success: false,
+        message: 'Conversation not found',
+        data: null,
+      };
+    }
+    
+    // Get messages (oldest first for display)
+    const offset = (page - 1) * limit;
+    const messages = await db.$queryRawUnsafe(
+      `SELECT * FROM conversation_messages 
+       WHERE conversation_id = ? 
+       ORDER BY timestamp DESC 
+       LIMIT ? OFFSET ?`,
+      conversationId, limit, offset
+    ) as any[];
+    
+    // Reverse to get oldest first
+    messages.reverse();
+    
+    // Get total message count
+    const [countResult] = await db.$queryRawUnsafe(
+      `SELECT COUNT(*) as total FROM conversation_messages WHERE conversation_id = ?`,
+      conversationId
+    ) as any[];
+    
+    const totalMessages = countResult?.total || 0;
+    
+    // Format messages
+    const formattedMessages: Message[] = messages.map(msg => ({
+      id: String(msg.id),
+      conversationId: String(msg.conversation_id),
+      whatsappMessageId: msg.whatsapp_message_id,
+      senderId: msg.direction === 'inbound' ? msg.from_phone : msg.to_phone,
+      fromPhone: msg.from_phone,
+      toPhone: msg.to_phone,
+      direction: msg.direction,
+      type: msg.message_type,
+      content: msg.message_content,
+      status: msg.status,
+      timestamp: msg.timestamp,
+      replyTo: msg.replied_to_message_id,
+      mediaUrl: msg.media_url,
+      mediaMimeType: msg.media_mime_type,
+      mediaFilename: msg.media_filename,
+      mediaCaption: msg.media_caption,
+      interactiveData: msg.interactive_data,
+      locationData: msg.location_data,
+      contactData: msg.contact_data,
+      incomingPayload: msg.incoming_payload,
+      outgoingPayload: msg.outgoing_payload,
+      webhookData: msg.webhook_data,
+      errorMessage: msg.error_message,
+      isRead: msg.is_read || false,
+      readAt: msg.read_at,
+    }));
+    
+    // Mark as read and clear unread count
+    await db.$executeRawUnsafe(
+      `UPDATE conversations SET unread_count = 0, updated_at = datetime('now') WHERE id = ?`,
+      conversationId
+    );
+    
+    return {
+      success: true,
+      message: 'Conversation retrieved successfully',
+      data: {
+        conversation: {
+          id: conversation.id,
+          displayName: getDisplayName(conversation.contact_name, conversation.contact_phone),
+          contactPhone: conversation.contact_phone,
+          contactName: conversation.contact_name,
+        },
+        messages: formattedMessages,
+        pagination: {
+          totalMessages,
+          currentPage: page,
+          messagesPerPage: limit,
+          hasMore: page * limit < totalMessages,
+        },
+      },
+    };
+  } catch (error) {
+    log.error('getConversationById error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to retrieve conversation',
+      data: null,
+    };
+  }
+}
+
+// ========================================
+// SEND MESSAGE
+// ========================================
+
+export interface SendMessageParams {
+  conversationId: number;
+  userId: string;
+  messageData: SendMessageRequest;
+}
+
+export async function sendMessage({
+  conversationId,
+  userId,
+  messageData,
+}: SendMessageParams) {
+  try {
+    // Get conversation
+    const [conversation] = await db.$queryRawUnsafe(
+      `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
+      conversationId, userId
+    ) as any[];
+    
+    if (!conversation) {
+      return {
+        success: false,
+        message: 'Conversation not found',
+        data: null,
+      };
+    }
+    
+    // Get CloudApiSetup for this user
+    const cloudSetup = await db.cloudApiSetup.findFirst({
+      where: {
+        userId: BigInt(userId),
+        phoneNumberId: BigInt(conversation.whatsapp_phone_number_id),
+      },
+    });
+    
+    if (!cloudSetup || !cloudSetup.whatsappAccessToken) {
+      return {
+        success: false,
+        message: 'WhatsApp configuration not found for this phone number',
+        data: null,
+      };
+    }
+    
+    // Build message payload
+    let messagePayload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: conversation.contact_phone,
+      type: messageData.messageType,
+    };
+    
+    // Add content based on message type
+    switch (messageData.messageType) {
+      case 'text':
+        messagePayload.text = { body: messageData.messageContent };
+        break;
+      case 'image':
+        messagePayload.image = {
+          link: messageData.mediaUrl,
+          caption: messageData.mediaCaption,
+        };
+        break;
+      case 'video':
+        messagePayload.video = {
+          link: messageData.mediaUrl,
+          caption: messageData.mediaCaption,
+        };
+        break;
+      case 'document':
+        messagePayload.document = {
+          link: messageData.mediaUrl,
+          caption: messageData.mediaCaption,
+          filename: messageData.messageContent,
+        };
+        break;
+      case 'audio':
+        messagePayload.audio = { link: messageData.mediaUrl };
+        break;
+      case 'template':
+        messagePayload.template = {
+          name: messageData.templateName,
+          language: { code: messageData.templateLanguage || 'en' },
+          components: messageData.templateComponents,
+        };
+        break;
+      default:
+        return {
+          success: false,
+          message: `Unsupported message type: ${messageData.messageType}`,
+          data: null,
+        };
+    }
+    
+    // Send to Meta
+    const sendResult = await sendMessageToMeta({
+      messagePayload,
+      accessToken: cloudSetup.whatsappAccessToken,
+      phoneNumberId: conversation.whatsapp_phone_number_id,
+      options: {
+        userId,
+        receiverId: conversation.contact_phone,
+      },
+    });
+    
+    if (!sendResult.success) {
+      return {
+        success: false,
+        message: sendResult.error || 'Failed to send message',
+        data: { errorCode: sendResult.errorCode },
+      };
+    }
+    
+    // Create message record
+    const messageTimestamp = new Date();
+    await db.$executeRawUnsafe(
+      `INSERT INTO conversation_messages 
+       (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
+        message_type, message_content, media_url, media_mime_type, media_filename, 
+        media_caption, status, timestamp, outgoing_payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      conversationId,
+      sendResult.messageId,
+      conversation.whatsapp_phone_number_id,
+      conversation.contact_phone,
+      'outbound',
+      messageData.messageType,
+      messageData.messageContent,
+      messageData.mediaUrl,
+      null, // media_mime_type
+      messageData.messageContent, // filename for documents
+      messageData.mediaCaption,
+      mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
+      messageTimestamp,
+      JSON.stringify(messagePayload)
+    );
+    
+    // Get the inserted message
+    const [newMessage] = await db.$queryRawUnsafe(
+      `SELECT * FROM conversation_messages WHERE whatsapp_message_id = ?`,
+      sendResult.messageId
+    ) as any[];
+    
+    // Update conversation
+    await db.$executeRawUnsafe(
+      `UPDATE conversations SET 
+        last_message_id = ?,
+        last_message_content = ?,
+        last_message_type = ?,
+        last_message_at = ?,
+        last_message_direction = 'outbound',
+        total_messages = total_messages + 1,
+        updated_at = datetime('now')
+       WHERE id = ?`,
+      sendResult.messageId,
+      messageData.messageContent || `[${messageData.messageType}]`,
+      messageData.messageType,
+      messageTimestamp,
+      conversationId
+    );
+    
+    // Publish real-time event
+    await publishNewMessage(
+      userId,
+      {
+        id: conversationId,
+        contactPhone: conversation.contact_phone,
+        contactName: conversation.contact_name,
+      },
+      {
+        id: newMessage.id,
+        whatsappMessageId: newMessage.whatsapp_message_id,
+        direction: 'outbound',
+        messageType: newMessage.message_type,
+        messageContent: newMessage.message_content,
+        status: newMessage.status,
+        timestamp: messageTimestamp,
+        mediaUrl: newMessage.media_url,
+        mediaMimeType: newMessage.media_mime_type,
+        mediaFilename: newMessage.media_filename,
+        outgoingPayload: messagePayload,
+      }
+    );
+    
+    return {
+      success: true,
+      message: 'Message sent successfully',
+      data: {
+        message: {
+          id: String(newMessage.id),
+          whatsappMessageId: sendResult.messageId,
+          direction: 'outbound',
+          messageType: messageData.messageType,
+          messageContent: messageData.messageContent,
+          mediaUrl: messageData.mediaUrl ? `/api/conversations/media/${newMessage.id}` : null,
+          mediaMimeType: null,
+          mediaFilename: messageData.messageContent,
+          mediaCaption: messageData.mediaCaption,
+          status: mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
+        },
+        whatsappMessageId: sendResult.messageId,
+        conversationLogged: true,
+      },
+    };
+  } catch (error) {
+    log.error('sendMessage error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to send message',
+      data: null,
+    };
+  }
+}
+
+// ========================================
+// MARK AS READ
+// ========================================
+
+export async function markConversationAsRead(conversationId: number, userId: string) {
+  try {
+    // Update conversation
+    await db.$executeRawUnsafe(
+      `UPDATE conversations SET unread_count = 0, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+      conversationId, userId
+    );
+    
+    // Mark all inbound messages as read
+    await db.$executeRawUnsafe(
+      `UPDATE conversation_messages SET is_read = true, read_at = datetime('now') 
+       WHERE conversation_id = ? AND direction = 'inbound' AND is_read = false`,
+      conversationId
+    );
+    
+    return {
+      success: true,
+      message: 'Conversation marked as read',
+    };
+  } catch (error) {
+    log.error('markAsRead error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to mark as read',
+    };
+  }
+}
+
+// ========================================
+// TOGGLE ARCHIVE
+// ========================================
+
+export async function toggleArchiveConversation(conversationId: number, userId: string) {
+  try {
+    // Get current state
+    const [conversation] = await db.$queryRawUnsafe(
+      `SELECT is_archived FROM conversations WHERE id = ? AND user_id = ?`,
+      conversationId, userId
+    ) as any[];
+    
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+    
+    const newArchivedState = !conversation.is_archived;
+    
+    await db.$executeRawUnsafe(
+      `UPDATE conversations SET is_archived = ?, updated_at = datetime('now') WHERE id = ?`,
+      newArchivedState, conversationId
+    );
+    
+    return {
+      success: true,
+      message: newArchivedState ? 'Conversation archived' : 'Conversation unarchived',
+      data: { isArchived: newArchivedState },
+    };
+  } catch (error) {
+    log.error('toggleArchive error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to toggle archive' };
+  }
+}
+
+// ========================================
+// TOGGLE PIN
+// ========================================
+
+export async function togglePinConversation(conversationId: number, userId: string) {
+  try {
+    const [conversation] = await db.$queryRawUnsafe(
+      `SELECT is_pinned FROM conversations WHERE id = ? AND user_id = ?`,
+      conversationId, userId
+    ) as any[];
+    
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+    
+    const newPinnedState = !conversation.is_pinned;
+    
+    await db.$executeRawUnsafe(
+      `UPDATE conversations SET is_pinned = ?, updated_at = datetime('now') WHERE id = ?`,
+      newPinnedState, conversationId
+    );
+    
+    return {
+      success: true,
+      message: newPinnedState ? 'Conversation pinned' : 'Conversation unpinned',
+      data: { isPinned: newPinnedState },
+    };
+  } catch (error) {
+    log.error('togglePin error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to toggle pin' };
+  }
+}
+
+// ========================================
+// DELETE CONVERSATION
+// ========================================
+
+export async function deleteConversation(conversationId: number, userId: string) {
+  try {
+    // Delete messages first
+    await db.$executeRawUnsafe(
+      `DELETE FROM conversation_messages WHERE conversation_id = ?`,
+      conversationId
+    );
+    
+    // Delete conversation
+    await db.$executeRawUnsafe(
+      `DELETE FROM conversations WHERE id = ? AND user_id = ?`,
+      conversationId, userId
+    );
+    
+    return {
+      success: true,
+      message: 'Conversation deleted',
+    };
+  } catch (error) {
+    log.error('delete error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to delete conversation' };
+  }
+}
+
+// ========================================
+// PROCESS INCOMING MESSAGE (for webhooks)
+// ========================================
+
+export interface IncomingMessageData {
+  userId: string;
+  phoneNumberId: string;
+  fromPhone: string;
+  whatsappMessageId: string;
+  messageType: string;
+  messageContent?: string;
+  mediaId?: string;
+  mediaMimeType?: string;
+  incomingPayload?: Record<string, unknown>;
+}
+
+export async function processIncomingMessage(data: IncomingMessageData) {
+  try {
+    const { userId, phoneNumberId, fromPhone, whatsappMessageId, messageType, messageContent, incomingPayload } = data;
+    
+    // Normalize phone
+    const normalizedPhone = normalizeConversationPhone(fromPhone);
+    if (!normalizedPhone) {
+      return { success: false, message: 'Invalid phone number' };
+    }
+    
+    // Find or create conversation
+    let [conversation] = await db.$queryRawUnsafe(
+      `SELECT * FROM conversations WHERE user_id = ? AND contact_phone = ? AND whatsapp_phone_number_id = ?`,
+      userId, normalizedPhone, phoneNumberId
+    ) as any[];
+    
+    if (!conversation) {
+      // Create new conversation
+      await db.$executeRawUnsafe(
+        `INSERT INTO conversations (user_id, contact_phone, whatsapp_phone_number_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+        userId, normalizedPhone, phoneNumberId
+      );
+      
+      [conversation] = await db.$queryRawUnsafe(
+        `SELECT * FROM conversations WHERE user_id = ? AND contact_phone = ? AND whatsapp_phone_number_id = ?`,
+        userId, normalizedPhone, phoneNumberId
+      ) as any[];
+    }
+    
+    // Check if message already exists
+    const [existingMessage] = await db.$queryRawUnsafe(
+      `SELECT id FROM conversation_messages WHERE whatsapp_message_id = ?`,
+      whatsappMessageId
+    ) as any[];
+    
+    if (existingMessage) {
+      return { success: true, message: 'Message already processed', conversationId: conversation.id };
+    }
+    
+    // Create message
+    const messageTimestamp = new Date();
+    await db.$executeRawUnsafe(
+      `INSERT INTO conversation_messages 
+       (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
+        message_type, message_content, status, timestamp, incoming_payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, datetime('now'), datetime('now'))`,
+      conversation.id,
+      whatsappMessageId,
+      normalizedPhone,
+      phoneNumberId,
+      'inbound',
+      messageType,
+      messageContent,
+      messageTimestamp,
+      JSON.stringify(incomingPayload)
+    );
+    
+    // Update conversation
+    await db.$executeRawUnsafe(
+      `UPDATE conversations SET 
+        last_message_id = ?,
+        last_message_content = ?,
+        last_message_type = ?,
+        last_message_at = ?,
+        last_message_direction = 'inbound',
+        unread_count = unread_count + 1,
+        total_messages = total_messages + 1,
+        updated_at = datetime('now')
+       WHERE id = ?`,
+      whatsappMessageId,
+      messageContent || `[${messageType}]`,
+      messageType,
+      messageTimestamp,
+      conversation.id
+    );
+    
+    // Publish real-time event
+    await publishNewMessage(userId, {
+      id: conversation.id,
+      contactPhone: normalizedPhone,
+      contactName: conversation.contact_name,
+    }, {
+      id: 0, // Will be updated
+      whatsappMessageId,
+      direction: 'inbound',
+      messageType,
+      messageContent: messageContent || null,
+      status: 'delivered',
+      timestamp: messageTimestamp,
+      incomingPayload: incomingPayload || null,
+    });
+    
+    return { 
+      success: true, 
+      message: 'Message processed', 
+      conversationId: conversation.id 
+    };
+  } catch (error) {
+    log.error('processIncomingMessage error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to process message' };
+  }
+}
+
+// ========================================
+// UPDATE MESSAGE STATUS (for webhooks)
+// ========================================
+
+export async function updateMessageStatus(
+  whatsappMessageId: string,
+  status: MessageStatus,
+  errorCode?: string,
+  errorMessage?: string
+) {
+  try {
+    await db.$executeRawUnsafe(
+      `UPDATE conversation_messages SET status = ?, error_message = ?, updated_at = datetime('now') WHERE whatsapp_message_id = ?`,
+      status,
+      errorMessage || null,
+      whatsappMessageId
+    );
+    
+    // Get conversation for pub/sub
+    const [message] = await db.$queryRawUnsafe(
+      `SELECT cm.*, c.user_id FROM conversation_messages cm 
+       JOIN conversations c ON cm.conversation_id = c.id 
+       WHERE cm.whatsapp_message_id = ?`,
+      whatsappMessageId
+    ) as any[];
+    
+    if (message) {
+      await publishStatusUpdate(message.user_id, {
+        messageId: whatsappMessageId,
+        conversationId: message.conversation_id,
+        status,
+        errorCode,
+        errorMessage,
+      });
+    }
+    
+    return { success: true };
+  } catch (error) {
+    log.error('updateStatus error', { error: error instanceof Error ? error.message : error });
+    return { success: false };
+  }
+}
+
+// Export controller
+export const conversationController = {
+  getConversations,
+  getConversationById,
+  sendMessage,
+  markAsRead: markConversationAsRead,
+  toggleArchive: toggleArchiveConversation,
+  togglePin: togglePinConversation,
+  delete: deleteConversation,
+  processIncomingMessage,
+  updateMessageStatus,
+};
+
+export default conversationController;
