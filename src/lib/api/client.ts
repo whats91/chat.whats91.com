@@ -69,7 +69,7 @@ export async function fetchConversations(params: {
  * Fetch a single conversation with messages
  */
 export async function fetchConversation(
-  conversationId: number,
+  conversationId: string | number,
   params: {
     page?: number;
     limit?: number;
@@ -93,7 +93,7 @@ export async function fetchConversation(
  * Send a message
  */
 export async function sendMessage(
-  conversationId: number,
+  conversationId: string | number,
   messageData: SendMessageRequest
 ): Promise<SendMessageResponse> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages`, {
@@ -108,7 +108,7 @@ export async function sendMessage(
 /**
  * Mark conversation as read
  */
-export async function markAsRead(conversationId: number): Promise<{ success: boolean; message: string }> {
+export async function markAsRead(conversationId: string | number): Promise<{ success: boolean; message: string }> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/read`, {
     method: 'POST',
     headers: getHeaders(),
@@ -120,7 +120,7 @@ export async function markAsRead(conversationId: number): Promise<{ success: boo
 /**
  * Toggle archive status
  */
-export async function toggleArchive(conversationId: number): Promise<{ success: boolean; message: string; data?: { isArchived: boolean } }> {
+export async function toggleArchive(conversationId: string | number): Promise<{ success: boolean; message: string; data?: { isArchived: boolean } }> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/archive`, {
     method: 'PATCH',
     headers: getHeaders(),
@@ -132,7 +132,7 @@ export async function toggleArchive(conversationId: number): Promise<{ success: 
 /**
  * Toggle pin status
  */
-export async function togglePin(conversationId: number): Promise<{ success: boolean; message: string; data?: { isPinned: boolean } }> {
+export async function togglePin(conversationId: string | number): Promise<{ success: boolean; message: string; data?: { isPinned: boolean } }> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/pin`, {
     method: 'PATCH',
     headers: getHeaders(),
@@ -144,7 +144,7 @@ export async function togglePin(conversationId: number): Promise<{ success: bool
 /**
  * Delete conversation
  */
-export async function deleteConversation(conversationId: number): Promise<{ success: boolean; message: string }> {
+export async function deleteConversation(conversationId: string | number): Promise<{ success: boolean; message: string }> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}`, {
     method: 'DELETE',
     headers: getHeaders(),
@@ -157,7 +157,7 @@ export async function deleteConversation(conversationId: number): Promise<{ succ
  * Upload media for messaging
  */
 export async function uploadMedia(
-  conversationId: number,
+  conversationId: string | number,
   file: File
 ): Promise<{
   success: boolean;

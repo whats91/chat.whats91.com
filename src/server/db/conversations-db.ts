@@ -1,30 +1,12 @@
-/**
- * Conversations Database Connection Module
- * 
- * This module provides MySQL connection for the conversations database.
- * Separate from the main database to handle high-volume chat traffic.
- * 
- * Database: whats91_chat_conversations (or configured CONVERSATIONS_DB_NAME)
- * Tables: conversations, conversation_messages, media_storage, message_reactions
- * 
- * NOTE: For Prisma to work with a second database, you need to:
- * 1. Generate a separate client: npx prisma generate --schema=prisma/schema-conversations.prisma
- * 2. Or use raw SQL queries through the main Prisma client with dynamic datasource
- */
-
 import 'server-only';
+import { PrismaClient } from '@prisma/client';
 import { Logger } from '@/lib/logger';
 
 const log = new Logger('ConversationsDB');
 
-// Type definitions
 export interface ConversationDbConfig {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
+  url: string;
   database: string;
-  connectionLimit?: number;
 }
 
 export interface ConversationMessage {
@@ -92,56 +74,81 @@ export interface MediaStorage {
   updatedAt: Date;
 }
 
-// Database configuration from environment
-const getConversationsDbConfig = (): ConversationDbConfig => ({
-  host: process.env.CONVERSATIONS_DB_HOST || process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.CONVERSATIONS_DB_PORT || process.env.DB_PORT || '3306'),
-  user: process.env.CONVERSATIONS_DB_USER || process.env.DB_USER || 'root',
-  password: process.env.CONVERSATIONS_DB_PASSWORD || process.env.DB_PASSWORD || '',
-  database: process.env.CONVERSATIONS_DB_NAME || 'whats91_chat_conversations',
-  connectionLimit: 5,
-});
+function parseDatabaseName(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.replace(/^\//, '');
+  } catch {
+    return '';
+  }
+}
 
-// Connection state
+function getConversationsDbConfig(): ConversationDbConfig {
+  const url = process.env.CONVERSATIONS_DATABASE_URL || process.env.DATABASE_URL || '';
+  return {
+    url,
+    database: parseDatabaseName(url),
+  };
+}
+
+const globalForConversationsDb = globalThis as typeof globalThis & {
+  __whats91ConversationsDb?: PrismaClient;
+  __whats91ConversationsDbUrl?: string;
+};
+
+function createConversationsDbClient(url: string): PrismaClient {
+  return new PrismaClient({
+    datasources: {
+      db: {
+        url,
+      },
+    },
+    log: process.env.ENABLE_DB_QUERY_LOGGING === 'true'
+      ? ['query', 'info', 'warn', 'error']
+      : ['error'],
+  });
+}
+
+export function getConversationsDb(): PrismaClient {
+  const { url } = getConversationsDbConfig();
+
+  if (!url) {
+    throw new Error('CONVERSATIONS_DATABASE_URL or DATABASE_URL must be set');
+  }
+
+  if (
+    !globalForConversationsDb.__whats91ConversationsDb ||
+    globalForConversationsDb.__whats91ConversationsDbUrl !== url
+  ) {
+    globalForConversationsDb.__whats91ConversationsDb = createConversationsDbClient(url);
+    globalForConversationsDb.__whats91ConversationsDbUrl = url;
+    log.info('Conversations Prisma client initialized', { database: parseDatabaseName(url) });
+  }
+
+  return globalForConversationsDb.__whats91ConversationsDb;
+}
+
 let isConnected = false;
 
-/**
- * Check if the conversations database is connected
- */
 export function isConversationsDbConnected(): boolean {
   return isConnected;
 }
 
-/**
- * Get the database name
- */
 export function getConversationsDbName(): string {
   return getConversationsDbConfig().database;
 }
 
-/**
- * Execute a query on the conversations database
- * Uses Prisma's $queryRaw with dynamic database selection
- * 
- * NOTE: This requires the DATABASE_URL to point to the conversations database
- * or use raw SQL with explicit database prefix
- */
+function normalizeSql(sql: string): string {
+  return sql.replace(/datetime\('now'\)/g, 'CURRENT_TIMESTAMP');
+}
+
 export async function queryConversationsDb<T = unknown>(
   sql: string,
   params: unknown[] = []
 ): Promise<T[]> {
   try {
-    // Import db dynamically to avoid circular dependencies
-    const { db } = await import('./mysql');
-    
-    // For raw queries, we need to use the database prefix
-    // since Prisma's $queryRaw doesn't support dynamic database selection
-    const dbName = getConversationsDbName();
-    const prefixedSql = sql.replace(/`?conversations`?/g, `\`${dbName}\`.conversations`)
-      .replace(/`?conversation_messages`?/g, `\`${dbName}\`.conversation_messages`)
-      .replace(/`?media_storage`?/g, `\`${dbName}\`.media_storage`);
-    
-    const result = await db.$queryRawUnsafe(prefixedSql, ...params);
+    const conversationsDb = getConversationsDb();
+    const result = await conversationsDb.$queryRawUnsafe(normalizeSql(sql), ...params);
     return result as T[];
   } catch (error) {
     log.error('Query error', { error: error instanceof Error ? error.message : error });
@@ -149,22 +156,13 @@ export async function queryConversationsDb<T = unknown>(
   }
 }
 
-/**
- * Execute a raw SQL command (INSERT, UPDATE, DELETE)
- */
 export async function executeConversationsDb(
   sql: string,
   params: unknown[] = []
 ): Promise<{ affectedRows: number; insertId: number }> {
   try {
-    const { db } = await import('./mysql');
-    
-    const dbName = getConversationsDbName();
-    const prefixedSql = sql.replace(/`?conversations`?/g, `\`${dbName}\`.conversations`)
-      .replace(/`?conversation_messages`?/g, `\`${dbName}\`.conversation_messages`)
-      .replace(/`?media_storage`?/g, `\`${dbName}\`.media_storage`);
-    
-    const result = await db.$executeRawUnsafe(prefixedSql, ...params);
+    const conversationsDb = getConversationsDb();
+    const result = await conversationsDb.$executeRawUnsafe(normalizeSql(sql), ...params);
     return { affectedRows: result, insertId: 0 };
   } catch (error) {
     log.error('Execute error', { error: error instanceof Error ? error.message : error });
@@ -172,13 +170,10 @@ export async function executeConversationsDb(
   }
 }
 
-/**
- * Test the database connection
- */
 export async function testConversationsDbConnection(): Promise<boolean> {
   try {
-    const { db } = await import('./mysql');
-    await db.$queryRawUnsafe(`SELECT 1`);
+    const conversationsDb = getConversationsDb();
+    await conversationsDb.$queryRawUnsafe('SELECT 1');
     log.info('Connection test passed');
     isConnected = true;
     return true;
@@ -189,13 +184,24 @@ export async function testConversationsDbConnection(): Promise<boolean> {
   }
 }
 
-// Export a simplified query interface
+export async function closeConversationsDb(): Promise<void> {
+  if (globalForConversationsDb.__whats91ConversationsDb) {
+    await globalForConversationsDb.__whats91ConversationsDb.$disconnect();
+    delete globalForConversationsDb.__whats91ConversationsDb;
+    delete globalForConversationsDb.__whats91ConversationsDbUrl;
+    isConnected = false;
+    log.info('Connection closed');
+  }
+}
+
 export const conversationsDb = {
   query: queryConversationsDb,
   execute: executeConversationsDb,
+  getClient: getConversationsDb,
   isConnected: isConversationsDbConnected,
   testConnection: testConversationsDbConnection,
   getName: getConversationsDbName,
+  close: closeConversationsDb,
 };
 
 export default conversationsDb;

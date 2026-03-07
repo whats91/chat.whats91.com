@@ -15,7 +15,6 @@
  */
 
 import 'server-only';
-import { db } from '@/lib/db';
 import type { 
   ConversationListItem,
   Message,
@@ -30,6 +29,8 @@ import {
   mapConversationMessageStatus 
 } from '../whatsapp/message-sender';
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
+import { findCloudApiSetupByUserAndPhoneNumberId } from '../db/cloud-api-setup';
+import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
 import { Logger } from '@/lib/logger';
 
 const log = new Logger('ConversationCtrl');
@@ -85,6 +86,23 @@ function getPreviewText(messageType: string, content: string | null): string {
   };
   
   return previews[messageType] || 'Message';
+}
+
+function toSafeNumber(value: unknown): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
 }
 
 // ========================================
@@ -154,7 +172,7 @@ export async function getConversations({
     params.push(limit, offset);
     
     // Execute query
-    const conversations = await db.$queryRawUnsafe(sql, ...params) as any[];
+    const conversations = await queryConversationsDb<any>(sql, params);
     
     // Get total count
     let countSql = `SELECT COUNT(*) as total FROM conversations WHERE user_id = ?`;
@@ -177,8 +195,12 @@ export async function getConversations({
       countSql += ` AND is_archived = false`;
     }
     
-    const [countResult] = await db.$queryRawUnsafe(countSql, ...countParams) as any[];
-    const totalItems = countResult?.total || 0;
+    if (unreadOnly) {
+      countSql += ` AND unread_count > 0`;
+    }
+
+    const [countResult] = await queryConversationsDb<any>(countSql, countParams);
+    const totalItems = toSafeNumber(countResult?.total);
     
     // Format response
     const formattedConversations: ConversationListItem[] = conversations.map(conv => ({
@@ -193,7 +215,7 @@ export async function getConversations({
       lastMessageDirection: conv.last_message_direction,
       lastMessageAt: conv.last_message_at,
       lastMessageTimeAgo: formatTimeAgo(conv.last_message_at),
-      unreadCount: conv.unread_count || 0,
+      unreadCount: toSafeNumber(conv.unread_count),
       isPinned: conv.is_pinned || false,
       isArchived: conv.is_archived || false,
       isMuted: conv.is_muted || false,
@@ -201,10 +223,10 @@ export async function getConversations({
     }));
     
     // Get unread count summary
-    const [unreadResult] = await db.$queryRawUnsafe(
+    const [unreadResult] = await queryConversationsDb<any>(
       `SELECT COUNT(*) as count FROM conversations WHERE user_id = ? AND unread_count > 0 AND is_archived = false`,
-      userId
-    ) as any[];
+      [userId]
+    );
     
     return {
       success: true,
@@ -221,7 +243,7 @@ export async function getConversations({
         },
         summary: {
           totalConversations: totalItems,
-          unreadConversations: unreadResult?.count || 0,
+          unreadConversations: toSafeNumber(unreadResult?.count),
         },
       },
     };
@@ -255,10 +277,10 @@ export async function getConversationById({
 }: GetConversationParams) {
   try {
     // Get conversation
-    const [conversation] = await db.$queryRawUnsafe(
+    const [conversation] = await queryConversationsDb<any>(
       `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
-      conversationId, userId
-    ) as any[];
+      [conversationId, userId]
+    );
     
     if (!conversation) {
       return {
@@ -270,24 +292,24 @@ export async function getConversationById({
     
     // Get messages (oldest first for display)
     const offset = (page - 1) * limit;
-    const messages = await db.$queryRawUnsafe(
+    const messages = await queryConversationsDb<any>(
       `SELECT * FROM conversation_messages 
        WHERE conversation_id = ? 
        ORDER BY timestamp DESC 
        LIMIT ? OFFSET ?`,
-      conversationId, limit, offset
-    ) as any[];
+      [conversationId, limit, offset]
+    );
     
     // Reverse to get oldest first
     messages.reverse();
     
     // Get total message count
-    const [countResult] = await db.$queryRawUnsafe(
+    const [countResult] = await queryConversationsDb<any>(
       `SELECT COUNT(*) as total FROM conversation_messages WHERE conversation_id = ?`,
-      conversationId
-    ) as any[];
+      [conversationId]
+    );
     
-    const totalMessages = countResult?.total || 0;
+    const totalMessages = toSafeNumber(countResult?.total);
     
     // Format messages
     const formattedMessages: Message[] = messages.map(msg => ({
@@ -319,9 +341,9 @@ export async function getConversationById({
     }));
     
     // Mark as read and clear unread count
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversations SET unread_count = 0, updated_at = datetime('now') WHERE id = ?`,
-      conversationId
+      [conversationId]
     );
     
     return {
@@ -370,10 +392,10 @@ export async function sendMessage({
 }: SendMessageParams) {
   try {
     // Get conversation
-    const [conversation] = await db.$queryRawUnsafe(
+    const [conversation] = await queryConversationsDb<any>(
       `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
-      conversationId, userId
-    ) as any[];
+      [conversationId, userId]
+    );
     
     if (!conversation) {
       return {
@@ -384,13 +406,11 @@ export async function sendMessage({
     }
     
     // Get CloudApiSetup for this user
-    const cloudSetup = await db.cloudApiSetup.findFirst({
-      where: {
-        userId: BigInt(userId),
-        phoneNumberId: BigInt(conversation.whatsapp_phone_number_id),
-      },
-    });
-    
+    const cloudSetup = await findCloudApiSetupByUserAndPhoneNumberId(
+      userId,
+      String(conversation.whatsapp_phone_number_id)
+    );
+
     if (!cloudSetup || !cloudSetup.whatsappAccessToken) {
       return {
         success: false,
@@ -470,36 +490,38 @@ export async function sendMessage({
     
     // Create message record
     const messageTimestamp = new Date();
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `INSERT INTO conversation_messages 
        (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
         message_type, message_content, media_url, media_mime_type, media_filename, 
         media_caption, status, timestamp, outgoing_payload, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      conversationId,
-      sendResult.messageId,
-      conversation.whatsapp_phone_number_id,
-      conversation.contact_phone,
-      'outbound',
-      messageData.messageType,
-      messageData.messageContent,
-      messageData.mediaUrl,
-      null, // media_mime_type
-      messageData.messageContent, // filename for documents
-      messageData.mediaCaption,
-      mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
-      messageTimestamp,
-      JSON.stringify(messagePayload)
+      [
+        conversationId,
+        sendResult.messageId,
+        conversation.whatsapp_phone_number_id,
+        conversation.contact_phone,
+        'outbound',
+        messageData.messageType,
+        messageData.messageContent,
+        messageData.mediaUrl,
+        null,
+        messageData.messageContent,
+        messageData.mediaCaption,
+        mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
+        messageTimestamp,
+        JSON.stringify(messagePayload),
+      ]
     );
     
     // Get the inserted message
-    const [newMessage] = await db.$queryRawUnsafe(
+    const [newMessage] = await queryConversationsDb<any>(
       `SELECT * FROM conversation_messages WHERE whatsapp_message_id = ?`,
-      sendResult.messageId
-    ) as any[];
+      [sendResult.messageId]
+    );
     
     // Update conversation
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversations SET 
         last_message_id = ?,
         last_message_content = ?,
@@ -509,11 +531,13 @@ export async function sendMessage({
         total_messages = total_messages + 1,
         updated_at = datetime('now')
        WHERE id = ?`,
-      sendResult.messageId,
-      messageData.messageContent || `[${messageData.messageType}]`,
-      messageData.messageType,
-      messageTimestamp,
-      conversationId
+      [
+        sendResult.messageId,
+        messageData.messageContent || `[${messageData.messageType}]`,
+        messageData.messageType,
+        messageTimestamp,
+        conversationId,
+      ]
     );
     
     // Publish real-time event
@@ -576,16 +600,16 @@ export async function sendMessage({
 export async function markConversationAsRead(conversationId: number, userId: string) {
   try {
     // Update conversation
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversations SET unread_count = 0, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
-      conversationId, userId
+      [conversationId, userId]
     );
     
     // Mark all inbound messages as read
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversation_messages SET is_read = true, read_at = datetime('now') 
        WHERE conversation_id = ? AND direction = 'inbound' AND is_read = false`,
-      conversationId
+      [conversationId]
     );
     
     return {
@@ -608,10 +632,10 @@ export async function markConversationAsRead(conversationId: number, userId: str
 export async function toggleArchiveConversation(conversationId: number, userId: string) {
   try {
     // Get current state
-    const [conversation] = await db.$queryRawUnsafe(
+    const [conversation] = await queryConversationsDb<any>(
       `SELECT is_archived FROM conversations WHERE id = ? AND user_id = ?`,
-      conversationId, userId
-    ) as any[];
+      [conversationId, userId]
+    );
     
     if (!conversation) {
       return { success: false, message: 'Conversation not found' };
@@ -619,9 +643,9 @@ export async function toggleArchiveConversation(conversationId: number, userId: 
     
     const newArchivedState = !conversation.is_archived;
     
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversations SET is_archived = ?, updated_at = datetime('now') WHERE id = ?`,
-      newArchivedState, conversationId
+      [newArchivedState, conversationId]
     );
     
     return {
@@ -641,10 +665,10 @@ export async function toggleArchiveConversation(conversationId: number, userId: 
 
 export async function togglePinConversation(conversationId: number, userId: string) {
   try {
-    const [conversation] = await db.$queryRawUnsafe(
+    const [conversation] = await queryConversationsDb<any>(
       `SELECT is_pinned FROM conversations WHERE id = ? AND user_id = ?`,
-      conversationId, userId
-    ) as any[];
+      [conversationId, userId]
+    );
     
     if (!conversation) {
       return { success: false, message: 'Conversation not found' };
@@ -652,9 +676,9 @@ export async function togglePinConversation(conversationId: number, userId: stri
     
     const newPinnedState = !conversation.is_pinned;
     
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversations SET is_pinned = ?, updated_at = datetime('now') WHERE id = ?`,
-      newPinnedState, conversationId
+      [newPinnedState, conversationId]
     );
     
     return {
@@ -675,15 +699,15 @@ export async function togglePinConversation(conversationId: number, userId: stri
 export async function deleteConversation(conversationId: number, userId: string) {
   try {
     // Delete messages first
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `DELETE FROM conversation_messages WHERE conversation_id = ?`,
-      conversationId
+      [conversationId]
     );
     
     // Delete conversation
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `DELETE FROM conversations WHERE id = ? AND user_id = ?`,
-      conversationId, userId
+      [conversationId, userId]
     );
     
     return {
@@ -723,30 +747,30 @@ export async function processIncomingMessage(data: IncomingMessageData) {
     }
     
     // Find or create conversation
-    let [conversation] = await db.$queryRawUnsafe(
+    let [conversation] = await queryConversationsDb<any>(
       `SELECT * FROM conversations WHERE user_id = ? AND contact_phone = ? AND whatsapp_phone_number_id = ?`,
-      userId, normalizedPhone, phoneNumberId
-    ) as any[];
+      [userId, normalizedPhone, phoneNumberId]
+    );
     
     if (!conversation) {
       // Create new conversation
-      await db.$executeRawUnsafe(
+      await executeConversationsDb(
         `INSERT INTO conversations (user_id, contact_phone, whatsapp_phone_number_id, status, created_at, updated_at)
          VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
-        userId, normalizedPhone, phoneNumberId
+        [userId, normalizedPhone, phoneNumberId]
       );
       
-      [conversation] = await db.$queryRawUnsafe(
+      [conversation] = await queryConversationsDb<any>(
         `SELECT * FROM conversations WHERE user_id = ? AND contact_phone = ? AND whatsapp_phone_number_id = ?`,
-        userId, normalizedPhone, phoneNumberId
-      ) as any[];
+        [userId, normalizedPhone, phoneNumberId]
+      );
     }
     
     // Check if message already exists
-    const [existingMessage] = await db.$queryRawUnsafe(
+    const [existingMessage] = await queryConversationsDb<any>(
       `SELECT id FROM conversation_messages WHERE whatsapp_message_id = ?`,
-      whatsappMessageId
-    ) as any[];
+      [whatsappMessageId]
+    );
     
     if (existingMessage) {
       return { success: true, message: 'Message already processed', conversationId: conversation.id };
@@ -754,24 +778,26 @@ export async function processIncomingMessage(data: IncomingMessageData) {
     
     // Create message
     const messageTimestamp = new Date();
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `INSERT INTO conversation_messages 
        (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
         message_type, message_content, status, timestamp, incoming_payload, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, datetime('now'), datetime('now'))`,
-      conversation.id,
-      whatsappMessageId,
-      normalizedPhone,
-      phoneNumberId,
-      'inbound',
-      messageType,
-      messageContent,
-      messageTimestamp,
-      JSON.stringify(incomingPayload)
+      [
+        conversation.id,
+        whatsappMessageId,
+        normalizedPhone,
+        phoneNumberId,
+        'inbound',
+        messageType,
+        messageContent,
+        messageTimestamp,
+        JSON.stringify(incomingPayload),
+      ]
     );
     
     // Update conversation
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversations SET 
         last_message_id = ?,
         last_message_content = ?,
@@ -782,11 +808,13 @@ export async function processIncomingMessage(data: IncomingMessageData) {
         total_messages = total_messages + 1,
         updated_at = datetime('now')
        WHERE id = ?`,
-      whatsappMessageId,
-      messageContent || `[${messageType}]`,
-      messageType,
-      messageTimestamp,
-      conversation.id
+      [
+        whatsappMessageId,
+        messageContent || `[${messageType}]`,
+        messageType,
+        messageTimestamp,
+        conversation.id,
+      ]
     );
     
     // Publish real-time event
@@ -827,20 +855,18 @@ export async function updateMessageStatus(
   errorMessage?: string
 ) {
   try {
-    await db.$executeRawUnsafe(
+    await executeConversationsDb(
       `UPDATE conversation_messages SET status = ?, error_message = ?, updated_at = datetime('now') WHERE whatsapp_message_id = ?`,
-      status,
-      errorMessage || null,
-      whatsappMessageId
+      [status, errorMessage || null, whatsappMessageId]
     );
     
     // Get conversation for pub/sub
-    const [message] = await db.$queryRawUnsafe(
+    const [message] = await queryConversationsDb<any>(
       `SELECT cm.*, c.user_id FROM conversation_messages cm 
        JOIN conversations c ON cm.conversation_id = c.id 
        WHERE cm.whatsapp_message_id = ?`,
-      whatsappMessageId
-    ) as any[];
+      [whatsappMessageId]
+    );
     
     if (message) {
       await publishStatusUpdate(message.user_id, {

@@ -24,23 +24,28 @@ export interface MySQLConfig {
   connectionLimit?: number;
 }
 
-// Prisma client singleton
-let prismaClient: PrismaClient | null = null;
+const globalForMainDb = globalThis as typeof globalThis & {
+  __whats91MainDb?: PrismaClient;
+};
+
+function createMainDbClient(): PrismaClient {
+  return new PrismaClient({
+    log: process.env.ENABLE_DB_QUERY_LOGGING === 'true'
+      ? ['query', 'info', 'warn', 'error']
+      : ['error'],
+  });
+}
 
 /**
  * Get the Prisma client instance for the main database
  */
 export function getMainDb(): PrismaClient {
-  if (!prismaClient) {
-    prismaClient = new PrismaClient({
-      log: process.env.ENABLE_DB_QUERY_LOGGING === 'true' 
-        ? ['query', 'info', 'warn', 'error']
-        : ['error'],
-    });
-    
+  if (!globalForMainDb.__whats91MainDb) {
+    globalForMainDb.__whats91MainDb = createMainDbClient();
     log.info('Prisma client initialized');
   }
-  return prismaClient;
+
+  return globalForMainDb.__whats91MainDb;
 }
 
 /**
@@ -62,9 +67,9 @@ export async function testMainDbConnection(): Promise<boolean> {
  * Close the database connection
  */
 export async function closeMainDb(): Promise<void> {
-  if (prismaClient) {
-    await prismaClient.$disconnect();
-    prismaClient = null;
+  if (globalForMainDb.__whats91MainDb) {
+    await globalForMainDb.__whats91MainDb.$disconnect();
+    delete globalForMainDb.__whats91MainDb;
     log.info('Connection closed');
   }
 }

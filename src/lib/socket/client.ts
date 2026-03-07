@@ -136,7 +136,7 @@ export function disconnectSocket(): void {
 /**
  * Subscribe to conversation updates
  */
-export function subscribeToConversation(conversationId: number): void {
+export function subscribeToConversation(conversationId: string | number): void {
   if (socket) {
     const socketInstance = socket as { emit: (event: string, data: unknown) => void };
     socketInstance.emit('conversation:subscribe', { conversationId });
@@ -146,7 +146,7 @@ export function subscribeToConversation(conversationId: number): void {
 /**
  * Unsubscribe from conversation
  */
-export function unsubscribeFromConversation(conversationId: number): void {
+export function unsubscribeFromConversation(conversationId: string | number): void {
   if (socket) {
     const socketInstance = socket as { emit: (event: string, data: unknown) => void };
     socketInstance.emit('conversation:unsubscribe', { conversationId });
@@ -156,7 +156,7 @@ export function unsubscribeFromConversation(conversationId: number): void {
 /**
  * Start typing indicator
  */
-export function startTyping(conversationId: number, userId: string): void {
+export function startTyping(conversationId: string | number, userId: string): void {
   if (socket) {
     const socketInstance = socket as { emit: (event: string, data: unknown) => void };
     socketInstance.emit('typing:start', { conversationId, userId });
@@ -166,7 +166,7 @@ export function startTyping(conversationId: number, userId: string): void {
 /**
  * Stop typing indicator
  */
-export function stopTyping(conversationId: number, userId: string): void {
+export function stopTyping(conversationId: string | number, userId: string): void {
   if (socket) {
     const socketInstance = socket as { emit: (event: string, data: unknown) => void };
     socketInstance.emit('typing:stop', { conversationId, userId });
@@ -176,7 +176,7 @@ export function stopTyping(conversationId: number, userId: string): void {
 /**
  * Notify conversation read
  */
-export function notifyRead(conversationId: number, userId: string): void {
+export function notifyRead(conversationId: string | number, userId: string): void {
   if (socket) {
     const socketInstance = socket as { emit: (event: string, data: unknown) => void };
     socketInstance.emit('conversation:read', { conversationId, userId });

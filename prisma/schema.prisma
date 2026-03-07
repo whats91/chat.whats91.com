@@ -1,8 +1,8 @@
 // ========================================
 // WHATS91 CHAT - PRISMA SCHEMA
 // ========================================
-// Development: SQLite (default)
-// Production: MySQL (set DATABASE_URL=mysql://...)
+// Runtime: MySQL
+// DATABASE_URL must point to the main application database.
 // ========================================
 // IMPORTANT: DATABASE SAFETY POLICY
 // ========================================
@@ -28,7 +28,7 @@ generator client {
 // ========================================
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 

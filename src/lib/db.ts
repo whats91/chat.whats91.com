@@ -1,13 +1,10 @@
-import { PrismaClient } from '@prisma/client'
+import 'server-only';
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-}
+export {
+  db,
+  getMainDb,
+  testMainDbConnection,
+  closeMainDb,
+} from '@/server/db/mysql';
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['query'],
-  })
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+export { db as default } from '@/server/db/mysql';

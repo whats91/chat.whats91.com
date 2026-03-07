@@ -25,8 +25,20 @@ const SHORTCUTS = {
 };
 
 export function AppShell() {
-  const { selectedConversationId, isNewChatModalOpen, toggleNewChatModal, selectConversation, isRightPanelOpen, conversations } = useChatStore();
+  const {
+    selectedConversationId,
+    isNewChatModalOpen,
+    toggleNewChatModal,
+    selectConversation,
+    isRightPanelOpen,
+    conversations,
+    loadConversations,
+  } = useChatStore();
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    void loadConversations();
+  }, [loadConversations]);
   
   // Keyboard shortcuts handler
   const handleKeyDown = useCallback(

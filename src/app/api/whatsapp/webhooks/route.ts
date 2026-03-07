@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { conversationController } from '@/server/controllers/conversation-controller';
-import { db } from '@/lib/db';
+import { findCloudApiSetupByPhoneNumberId } from '@/server/db/cloud-api-setup';
 import type { WebhookEntry } from '@/lib/types/chat';
 import { Logger } from '@/lib/logger';
 
@@ -71,9 +71,7 @@ export async function POST(request: NextRequest) {
         if (!phoneNumberId) continue;
         
         // Find the CloudApiSetup for this phone number
-        const cloudSetup = await db.cloudApiSetup.findFirst({
-          where: { phoneNumberId: BigInt(phoneNumberId) },
-        });
+        const cloudSetup = await findCloudApiSetupByPhoneNumberId(phoneNumberId);
         
         if (!cloudSetup || !cloudSetup.accessChats) {
           log.debug('No CloudApiSetup found or chats disabled', { phoneNumberId });

@@ -9,17 +9,25 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Conversation, Message, SendMessageRequest } from '@/lib/types/chat';
 import { fetchConversations, fetchConversation, sendMessage as apiSendMessage } from '@/lib/api/client';
+import { mockLabels } from '@/lib/mock/data';
+
+interface ChatLabel {
+  id: string;
+  name: string;
+  color: string;
+}
 
 interface ChatState {
   // Conversations
   conversations: Conversation[];
-  selectedConversationId: number | null;
+  selectedConversationId: string | null;
+  labels: ChatLabel[];
   searchQuery: string;
   isLoadingConversations: boolean;
   conversationsError: string | null;
   
   // Messages
-  messagesByConversation: Map<number, Message[]>;
+  messagesByConversation: Map<string, Message[]>;
   isLoadingMessages: boolean;
   messagesError: string | null;
   hasMoreMessages: boolean;
@@ -39,8 +47,8 @@ interface ChatState {
   
   // Actions
   loadConversations: (page?: number, search?: string) => Promise<void>;
-  loadMessages: (conversationId: number, page?: number) => Promise<void>;
-  selectConversation: (id: number | null) => void;
+  loadMessages: (conversationId: string, page?: number) => Promise<void>;
+  selectConversation: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
   toggleRightPanel: () => void;
   toggleNewChatModal: () => void;
@@ -48,22 +56,22 @@ interface ChatState {
   setSocketConnected: (connected: boolean) => void;
   
   // Message Actions
-  sendMessage: (conversationId: number, content: string, type?: string, mediaUrl?: string) => Promise<void>;
-  markAsRead: (conversationId: number) => void;
+  sendMessage: (conversationId: string, content: string, type?: string, mediaUrl?: string) => Promise<void>;
+  markAsRead: (conversationId: string) => void;
   
   // Conversation Actions
-  pinConversation: (id: number) => void;
-  archiveConversation: (id: number) => void;
-  muteConversation: (id: number) => void;
-  deleteConversation: (id: number) => void;
+  pinConversation: (id: string) => void;
+  archiveConversation: (id: string) => void;
+  muteConversation: (id: string) => void;
+  deleteConversation: (id: string) => void;
   
   // Real-time updates
-  handleNewMessage: (data: { conversationId: number; message: Message }) => void;
-  handleStatusUpdate: (data: { messageId: string; status: string; conversationId: number }) => void;
+  handleNewMessage: (data: { conversationId: string | number; message: Message }) => void;
+  handleStatusUpdate: (data: { messageId: string; status: string; conversationId: string | number }) => void;
   
   // Getters
   getSelectedConversation: () => Conversation | null;
-  getMessages: (conversationId: number) => Message[];
+  getMessages: (conversationId: string) => Message[];
   getFilteredConversations: () => Conversation[];
 }
 
@@ -73,6 +81,7 @@ export const useChatStore = create<ChatState>()(
       // Initial state
       conversations: [],
       selectedConversationId: null,
+      labels: mockLabels,
       searchQuery: '',
       isLoadingConversations: false,
       conversationsError: null,
@@ -146,7 +155,7 @@ export const useChatStore = create<ChatState>()(
       },
       
       // Load messages for a conversation
-      loadMessages: async (conversationId: number, page = 1) => {
+      loadMessages: async (conversationId: string, page = 1) => {
         set({ isLoadingMessages: true, messagesError: null });
         
         try {
@@ -245,7 +254,7 @@ export const useChatStore = create<ChatState>()(
         const tempId = `temp-${Date.now()}`;
         const tempMessage: Message = {
           id: tempId,
-          conversationId: String(conversationId),
+          conversationId,
           whatsappMessageId: tempId,
           senderId: 'current-user',
           fromPhone: '',
@@ -321,7 +330,7 @@ export const useChatStore = create<ChatState>()(
       markAsRead: (conversationId) => {
         set((state) => ({
           conversations: state.conversations.map(conv => 
-            conv.id === String(conversationId) ? { ...conv, unreadCount: 0 } : conv
+            conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
           ),
         }));
       },
@@ -329,7 +338,7 @@ export const useChatStore = create<ChatState>()(
       pinConversation: (id) => {
         set((state) => ({
           conversations: state.conversations.map(conv =>
-            conv.id === String(id) ? { ...conv, isPinned: !conv.isPinned } : conv
+            conv.id === id ? { ...conv, isPinned: !conv.isPinned } : conv
           ),
         }));
       },
@@ -337,7 +346,7 @@ export const useChatStore = create<ChatState>()(
       archiveConversation: (id) => {
         set((state) => ({
           conversations: state.conversations.map(conv =>
-            conv.id === String(id) ? { ...conv, isArchived: !conv.isArchived } : conv
+            conv.id === id ? { ...conv, isArchived: !conv.isArchived } : conv
           ),
         }));
       },
@@ -345,14 +354,14 @@ export const useChatStore = create<ChatState>()(
       muteConversation: (id) => {
         set((state) => ({
           conversations: state.conversations.map(conv =>
-            conv.id === String(id) ? { ...conv, isMuted: !conv.isMuted } : conv
+            conv.id === id ? { ...conv, isMuted: !conv.isMuted } : conv
           ),
         }));
       },
       
       deleteConversation: (id) => {
         set((state) => ({
-          conversations: state.conversations.filter(conv => conv.id !== String(id)),
+          conversations: state.conversations.filter(conv => conv.id !== id),
           selectedConversationId: state.selectedConversationId === id ? null : state.selectedConversationId,
         }));
       },
@@ -360,22 +369,26 @@ export const useChatStore = create<ChatState>()(
       // Handle new message from socket
       handleNewMessage: (data) => {
         const { conversationId, message } = data;
+        const conversationKey = String(conversationId);
         
         set((state) => {
           // Add message to conversation
           const newMap = new Map(state.messagesByConversation);
-          const messages = newMap.get(conversationId) || [];
-          newMap.set(conversationId, [...messages, message]);
+          const messages = newMap.get(conversationKey) || [];
+          newMap.set(conversationKey, [
+            ...messages,
+            { ...message, conversationId: conversationKey },
+          ]);
           
           // Update conversation preview
           const conversations = state.conversations.map(conv => {
-            if (conv.id === String(conversationId)) {
+            if (conv.id === conversationKey) {
               return {
                 ...conv,
                 lastMessage: {
                   ...message,
                   id: message.id,
-                  conversationId: String(conversationId),
+                  conversationId: conversationKey,
                 },
                 updatedAt: message.timestamp,
                 unreadCount: conv.unreadCount + 1,
@@ -391,23 +404,24 @@ export const useChatStore = create<ChatState>()(
       // Handle status update from socket
       handleStatusUpdate: (data) => {
         const { messageId, status, conversationId } = data;
+        const conversationKey = String(conversationId);
         
         set((state) => {
           const newMap = new Map(state.messagesByConversation);
-          const messages = newMap.get(conversationId) || [];
+          const messages = newMap.get(conversationKey) || [];
           const updatedMessages = messages.map(m => 
             m.whatsappMessageId === messageId 
               ? { ...m, status: status as Message['status'] }
               : m
           );
-          newMap.set(conversationId, updatedMessages);
+          newMap.set(conversationKey, updatedMessages);
           return { messagesByConversation: newMap };
         });
       },
       
       getSelectedConversation: () => {
         const state = get();
-        return state.conversations.find(c => c.id === String(state.selectedConversationId)) || null;
+        return state.conversations.find(c => c.id === state.selectedConversationId) || null;
       },
       
       getMessages: (conversationId) => {
