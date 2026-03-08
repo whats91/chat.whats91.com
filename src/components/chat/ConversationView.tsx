@@ -51,6 +51,8 @@ import {
   Star,
   Forward,
   Info,
+  Archive,
+  Pin,
   Trash2,
 } from 'lucide-react';
 import type { Message, Conversation, ConversationTarget, SendMessageRequest } from '@/lib/types/chat';
@@ -115,7 +117,9 @@ export function ConversationView({
 }: ConversationViewProps) {
   const {
     conversations,
+    archiveConversation,
     getMessages,
+    pinConversation,
     sendMessage,
     loadConversations,
     loadMessages,
@@ -278,6 +282,12 @@ export function ConversationView({
         isSearchOpen={isSearchOpen}
         onInfoClick={() => toggleRightPanel()}
         isInfoOpen={isRightPanelOpen}
+        onArchiveToggle={() => {
+          void archiveConversation(conversation.id);
+        }}
+        onPinToggle={() => {
+          void pinConversation(conversation.id);
+        }}
         onClearChat={() => setDangerAction('clear')}
         onDeleteConversation={() => setDangerAction('delete')}
       />
@@ -361,6 +371,8 @@ interface ConversationHeaderProps {
   isSearchOpen: boolean;
   onInfoClick: () => void;
   isInfoOpen: boolean;
+  onArchiveToggle: () => void;
+  onPinToggle: () => void;
   onClearChat: () => void;
   onDeleteConversation: () => void;
 }
@@ -373,6 +385,8 @@ function ConversationHeader({
   isSearchOpen,
   onInfoClick,
   isInfoOpen,
+  onArchiveToggle,
+  onPinToggle,
   onClearChat,
   onDeleteConversation,
 }: ConversationHeaderProps) {
@@ -467,6 +481,15 @@ function ConversationHeader({
             <DropdownMenuItem onClick={onInfoClick}>
               <Info className="h-4 w-4 mr-2" />
               {isInfoOpen ? 'Close info' : 'View info'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onPinToggle}>
+              <Pin className="h-4 w-4 mr-2" />
+              {conversation.isPinned ? 'Unpin chat' : 'Pin chat'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onArchiveToggle}>
+              <Archive className="h-4 w-4 mr-2" />
+              {conversation.isArchived ? 'Unarchive chat' : 'Archive chat'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive">Block</DropdownMenuItem>

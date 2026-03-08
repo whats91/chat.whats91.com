@@ -180,7 +180,7 @@ export async function getConversations({
     }
     
     // Add ordering and pagination
-    sql += ` ORDER BY is_pinned DESC, last_message_at DESC LIMIT ? OFFSET ?`;
+    sql += ` ORDER BY is_pinned DESC, COALESCE(last_message_at, updated_at) DESC, id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
     
     // Execute query
@@ -1056,8 +1056,8 @@ export async function toggleArchiveConversation(conversationId: number, userId: 
     const newArchivedState = !conversation.is_archived;
     
     await executeConversationsDb(
-      `UPDATE conversations SET is_archived = ?, updated_at = datetime('now') WHERE id = ?`,
-      [newArchivedState, conversationId]
+      `UPDATE conversations SET is_archived = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+      [newArchivedState, conversationId, userId]
     );
     
     return {
@@ -1089,8 +1089,8 @@ export async function togglePinConversation(conversationId: number, userId: stri
     const newPinnedState = !conversation.is_pinned;
     
     await executeConversationsDb(
-      `UPDATE conversations SET is_pinned = ?, updated_at = datetime('now') WHERE id = ?`,
-      [newPinnedState, conversationId]
+      `UPDATE conversations SET is_pinned = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+      [newPinnedState, conversationId, userId]
     );
     
     return {

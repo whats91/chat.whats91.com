@@ -32,13 +32,8 @@ export function AppShell() {
     selectConversation,
     isRightPanelOpen,
     conversations,
-    loadConversations,
   } = useChatStore();
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    void loadConversations();
-  }, [loadConversations]);
   
   // Keyboard shortcuts handler
   const handleKeyDown = useCallback(
@@ -94,14 +89,14 @@ export function AppShell() {
       // Archive chat: Ctrl/Cmd + E
       if (isCtrl && e.key.toLowerCase() === SHORTCUTS.archiveChat.key && selectedConversationId) {
         e.preventDefault();
-        useChatStore.getState().archiveConversation(selectedConversationId);
+        void useChatStore.getState().archiveConversation(selectedConversationId);
         return;
       }
       
       // Pin chat: Ctrl/Cmd + P
       if (isCtrl && e.key.toLowerCase() === SHORTCUTS.pinChat.key && selectedConversationId) {
         e.preventDefault();
-        useChatStore.getState().pinConversation(selectedConversationId);
+        void useChatStore.getState().pinConversation(selectedConversationId);
         return;
       }
       

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
@@ -25,8 +25,7 @@ import {
   Search,
   MoreVertical,
   MessageSquarePlus,
-  Phone,
-  Filter,
+  Loader2,
 } from 'lucide-react';
 import type { Conversation } from '@/lib/types/chat';
 import { formatDistanceToNow } from 'date-fns';
@@ -45,35 +44,83 @@ export function ChatList({ className }: ChatListProps) {
     pinConversation,
     archiveConversation,
     muteConversation,
+    loadConversations,
+    loadMoreConversations,
+    hasMoreConversations,
+    isLoadingConversations,
     toggleNewChatModal,
   } = useChatStore();
   
   const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const scrollAreaContainerRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
   const [dangerDialogState, setDangerDialogState] = useState<{
     action: 'clear' | 'delete';
     conversationId: string;
     conversationName: string;
   } | null>(null);
+
+  useEffect(() => {
+    void loadConversations({
+      page: 1,
+      search: deferredSearchQuery.trim(),
+      archived: filter === 'archived',
+      unreadOnly: filter === 'unread',
+    });
+  }, [deferredSearchQuery, filter, loadConversations]);
+
+  useEffect(() => {
+    const root = scrollAreaContainerRef.current?.querySelector('[data-slot="scroll-area-viewport"]');
+    const target = loadMoreTriggerRef.current;
+
+    if (!root || !target || !hasMoreConversations) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting) && !isLoadingConversations) {
+          void loadMoreConversations();
+        }
+      },
+      {
+        root,
+        rootMargin: '240px 0px',
+      }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMoreConversations, isLoadingConversations, loadMoreConversations, conversations.length]);
   
-  const filteredConversations = conversations
-    .filter(conv => {
+  const filteredConversations = useMemo(
+    () =>
+      conversations
+        .filter(conv => {
       if (filter === 'unread') return conv.unreadCount > 0;
       if (filter === 'archived') return conv.isArchived;
       return !conv.isArchived;
-    })
-    .sort((a, b) => {
-      if (a.isPinned && !b.isPinned) return -1;
-      if (!a.isPinned && b.isPinned) return 1;
-      return b.updatedAt.getTime() - a.updatedAt.getTime();
-    });
+        })
+        .sort((a, b) => {
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          return b.updatedAt.getTime() - a.updatedAt.getTime();
+        }),
+    [conversations, filter]
+  );
   
-  const searchFiltered = searchQuery
-    ? filteredConversations.filter(conv =>
+  const searchFiltered = useMemo(
+    () =>
+      searchQuery
+        ? filteredConversations.filter(conv =>
         (conv.participant?.name || conv.contactName || conv.contactPhone).toLowerCase().includes(searchQuery.toLowerCase()) ||
         (conv.participant?.phone || conv.contactPhone).includes(searchQuery) ||
         conv.lastMessage?.content?.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : filteredConversations;
+        : filteredConversations,
+    [filteredConversations, searchQuery]
+  );
   
   return (
     <div className={cn('flex flex-col h-full bg-background', className)}>
@@ -151,7 +198,8 @@ export function ChatList({ className }: ChatListProps) {
       </div>
       
       {/* Chat List */}
-      <ScrollArea className="flex-1">
+      <div ref={scrollAreaContainerRef} className="flex-1 min-h-0">
+      <ScrollArea className="h-full">
         {searchFiltered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
             <MessageSquarePlus className="h-10 w-10 mb-2 opacity-50" />
@@ -165,8 +213,12 @@ export function ChatList({ className }: ChatListProps) {
                 conversation={conversation}
                 isSelected={conversation.id === selectedConversationId}
                 onSelect={() => selectConversation(conversation.id)}
-                onPin={() => pinConversation(conversation.id)}
-                onArchive={() => archiveConversation(conversation.id)}
+                onPin={() => {
+                  void pinConversation(conversation.id);
+                }}
+                onArchive={() => {
+                  void archiveConversation(conversation.id);
+                }}
                 onMute={() => muteConversation(conversation.id)}
                 onClear={() =>
                   setDangerDialogState({
@@ -186,9 +238,17 @@ export function ChatList({ className }: ChatListProps) {
                 }
               />
             ))}
+            <div ref={loadMoreTriggerRef} className="h-1" />
+            {(isLoadingConversations || hasMoreConversations) && searchFiltered.length > 0 ? (
+              <div className="flex items-center justify-center gap-2 px-3 py-4 text-xs text-muted-foreground">
+                {isLoadingConversations ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                <span>{isLoadingConversations ? 'Loading more chats...' : 'Scroll for more chats'}</span>
+              </div>
+            ) : null}
           </div>
         )}
       </ScrollArea>
+      </div>
 
       <ConversationDangerDialog
         open={dangerDialogState !== null}

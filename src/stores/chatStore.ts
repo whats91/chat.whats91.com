@@ -14,6 +14,8 @@ import {
   fetchConversations,
   fetchConversation,
   sendMessage as apiSendMessage,
+  toggleArchive as apiToggleArchive,
+  togglePin as apiTogglePin,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { mockLabels } from '@/lib/mock/data';
@@ -47,6 +49,125 @@ function sortMessagesChronologically(messages: Message[]): Message[] {
   return [...messages].sort(compareMessages);
 }
 
+interface ConversationListQuery {
+  search: string;
+  archived: boolean;
+  unreadOnly: boolean;
+  status: string;
+  limit: number;
+}
+
+interface LoadConversationsOptions extends Partial<ConversationListQuery> {
+  page?: number;
+  append?: boolean;
+}
+
+const DEFAULT_CONVERSATION_LIST_QUERY: ConversationListQuery = {
+  search: '',
+  archived: false,
+  unreadOnly: false,
+  status: 'active',
+  limit: 20,
+};
+
+function toConversationDate(value: Date | string | null | undefined): Date {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (value) {
+    return new Date(value);
+  }
+
+  return new Date(0);
+}
+
+function compareConversations(left: Conversation, right: Conversation): number {
+  if (left.isPinned !== right.isPinned) {
+    return left.isPinned ? -1 : 1;
+  }
+
+  const timestampDiff =
+    toConversationDate(right.updatedAt).getTime() - toConversationDate(left.updatedAt).getTime();
+  if (timestampDiff !== 0) {
+    return timestampDiff;
+  }
+
+  const leftId = Number(left.id);
+  const rightId = Number(right.id);
+  if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
+    return rightId - leftId;
+  }
+
+  return String(right.id).localeCompare(String(left.id));
+}
+
+function sortConversations(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort(compareConversations);
+}
+
+function mergeConversationPages(existing: Conversation[], incoming: Conversation[]): Conversation[] {
+  const conversationMap = new Map(existing.map((conversation) => [conversation.id, conversation]));
+
+  for (const conversation of incoming) {
+    const previous = conversationMap.get(conversation.id);
+    conversationMap.set(conversation.id, previous ? { ...previous, ...conversation } : conversation);
+  }
+
+  return sortConversations(Array.from(conversationMap.values()));
+}
+
+function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof fetchConversations>>['data']['conversations'][number]): Conversation {
+  return {
+    id: String(conv.id),
+    userId: getCurrentUserId(),
+    contactPhone: conv.contactPhone,
+    contactName: conv.contactName,
+    whatsappPhoneNumberId: '',
+    lastMessageId: conv.lastMessageContent ? `last-${conv.id}` : null,
+    lastMessageContent: conv.lastMessageContent,
+    lastMessageType: (conv.lastMessageType || 'text') as Message['type'],
+    lastMessageAt: conv.lastMessageAt ? new Date(conv.lastMessageAt) : null,
+    lastMessageDirection: conv.lastMessageDirection,
+    participant: {
+      id: String(conv.id),
+      name: conv.displayName,
+      phone: conv.contactPhone,
+      status: 'offline',
+      avatar: undefined,
+    },
+    lastMessage: conv.lastMessageContent
+      ? {
+          id: `last-${conv.id}`,
+          conversationId: String(conv.id),
+          whatsappMessageId: `last-${conv.id}`,
+          senderId: conv.lastMessageDirection === 'inbound' ? String(conv.id) : getCurrentUserId(),
+          fromPhone: conv.contactPhone,
+          toPhone: '',
+          direction: conv.lastMessageDirection || 'outbound',
+          content: conv.lastMessageContent,
+          type: (conv.lastMessageType || 'text') as Message['type'],
+          status: 'read',
+          timestamp: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
+          isRead: true,
+        }
+      : undefined,
+    unreadCount: conv.unreadCount,
+    totalMessages: 0,
+    isPinned: conv.isPinned,
+    isArchived: conv.isArchived,
+    isMuted: conv.isMuted,
+    status: conv.status,
+    metaData: null,
+    createdAt: new Date(),
+    updatedAt: conv.lastMessageAt
+      ? new Date(conv.lastMessageAt)
+      : conv.updatedAt
+        ? new Date(conv.updatedAt)
+        : new Date(),
+  };
+}
+
 interface ChatState {
   // Conversations
   conversations: Conversation[];
@@ -55,6 +176,8 @@ interface ChatState {
   searchQuery: string;
   isLoadingConversations: boolean;
   conversationsError: string | null;
+  hasMoreConversations: boolean;
+  conversationListQuery: ConversationListQuery;
   
   // Messages
   messagesByConversation: Map<string, Message[]>;
@@ -76,7 +199,8 @@ interface ChatState {
   totalItems: number;
   
   // Actions
-  loadConversations: (page?: number, search?: string) => Promise<void>;
+  loadConversations: (options?: LoadConversationsOptions) => Promise<void>;
+  loadMoreConversations: () => Promise<void>;
   loadMessages: (conversationId: string, page?: number) => Promise<void>;
   selectConversation: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
@@ -90,8 +214,8 @@ interface ChatState {
   markAsRead: (conversationId: string) => void;
   
   // Conversation Actions
-  pinConversation: (id: string) => void;
-  archiveConversation: (id: string) => void;
+  pinConversation: (id: string) => Promise<void>;
+  archiveConversation: (id: string) => Promise<void>;
   muteConversation: (id: string) => void;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -116,6 +240,8 @@ export const useChatStore = create<ChatState>()(
       searchQuery: '',
       isLoadingConversations: false,
       conversationsError: null,
+      hasMoreConversations: false,
+      conversationListQuery: DEFAULT_CONVERSATION_LIST_QUERY,
       messagesByConversation: new Map(),
       isLoadingMessages: false,
       messagesError: null,
@@ -129,68 +255,46 @@ export const useChatStore = create<ChatState>()(
       totalItems: 0,
       
       // Load conversations from API
-      loadConversations: async (page = 1, search = '') => {
+      loadConversations: async (options = {}) => {
+        const state = get();
+        const page = options.page ?? 1;
+        const append = options.append ?? false;
+        const query: ConversationListQuery = {
+          ...state.conversationListQuery,
+          ...options,
+          search: options.search ?? state.conversationListQuery.search,
+          archived: options.archived ?? state.conversationListQuery.archived,
+          unreadOnly: options.unreadOnly ?? state.conversationListQuery.unreadOnly,
+          status: options.status ?? state.conversationListQuery.status,
+          limit: options.limit ?? state.conversationListQuery.limit,
+        };
+
         set({ isLoadingConversations: true, conversationsError: null });
         
         try {
-          const response = await fetchConversations({ page, limit: 20, search });
+          const response = await fetchConversations({
+            page,
+            limit: query.limit,
+            search: query.search || undefined,
+            archived: query.archived,
+            unreadOnly: query.unreadOnly,
+            status: query.status,
+          });
           
           if (response.success && response.data) {
-            // Transform API response to match frontend types
-            const conversations: Conversation[] = response.data.conversations.map(conv => ({
-              id: String(conv.id),
-              userId: getCurrentUserId(),
-              contactPhone: conv.contactPhone,
-              contactName: conv.contactName,
-              whatsappPhoneNumberId: '',
-              lastMessageId: conv.lastMessageContent ? `last-${conv.id}` : null,
-              lastMessageContent: conv.lastMessageContent,
-              lastMessageType: (conv.lastMessageType || 'text') as Message['type'],
-              lastMessageAt: conv.lastMessageAt ? new Date(conv.lastMessageAt) : null,
-              lastMessageDirection: conv.lastMessageDirection,
-              participant: {
-                id: String(conv.id),
-                name: conv.displayName,
-                phone: conv.contactPhone,
-                status: 'offline',
-                avatar: undefined,
-              },
-              lastMessage: conv.lastMessageContent ? {
-                id: `last-${conv.id}`,
-                conversationId: String(conv.id),
-                whatsappMessageId: `last-${conv.id}`,
-                senderId: conv.lastMessageDirection === 'inbound' ? String(conv.id) : getCurrentUserId(),
-                fromPhone: conv.contactPhone,
-                toPhone: '',
-                direction: conv.lastMessageDirection || 'outbound',
-                content: conv.lastMessageContent,
-                type: (conv.lastMessageType || 'text') as Message['type'],
-                status: 'read',
-                timestamp: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
-                isRead: true,
-              } : undefined,
-              unreadCount: conv.unreadCount,
-              totalMessages: 0,
-              isPinned: conv.isPinned,
-              isArchived: conv.isArchived,
-              isMuted: conv.isMuted,
-              status: conv.status,
-              metaData: null,
-              createdAt: new Date(),
-              updatedAt: conv.lastMessageAt
-                ? new Date(conv.lastMessageAt)
-                : conv.updatedAt
-                  ? new Date(conv.updatedAt)
-                  : new Date(),
-            }));
-            
-            set({
-              conversations,
+            const incomingConversations = response.data.conversations.map(mapConversationListItemToConversation);
+
+            set((currentState) => ({
+              conversations: append
+                ? mergeConversationPages(currentState.conversations, incomingConversations)
+                : sortConversations(incomingConversations),
               currentPage: response.data.pagination.currentPage,
               totalPages: response.data.pagination.totalPages,
               totalItems: response.data.pagination.totalItems,
+              hasMoreConversations: response.data.pagination.hasNextPage,
+              conversationListQuery: query,
               isLoadingConversations: false,
-            });
+            }));
           } else {
             set({ 
               conversationsError: response.message || 'Failed to load conversations',
@@ -203,6 +307,20 @@ export const useChatStore = create<ChatState>()(
             isLoadingConversations: false 
           });
         }
+      },
+
+      loadMoreConversations: async () => {
+        const state = get();
+
+        if (state.isLoadingConversations || !state.hasMoreConversations) {
+          return;
+        }
+
+        await get().loadConversations({
+          ...state.conversationListQuery,
+          page: state.currentPage + 1,
+          append: true,
+        });
       },
       
       // Load messages for a conversation
@@ -394,20 +512,54 @@ export const useChatStore = create<ChatState>()(
         }));
       },
       
-      pinConversation: (id) => {
-        set((state) => ({
-          conversations: state.conversations.map(conv =>
-            conv.id === id ? { ...conv, isPinned: !conv.isPinned } : conv
-          ),
-        }));
+      pinConversation: async (id) => {
+        try {
+          const response = await apiTogglePin(id);
+          if (!response.success) {
+            throw new Error(response.message || 'Failed to update pin state');
+          }
+
+          set((state) => ({
+            conversations: sortConversations(
+              state.conversations.map((conv) =>
+                conv.id === id
+                  ? { ...conv, isPinned: response.data?.isPinned ?? !conv.isPinned }
+                  : conv
+              )
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update pin state',
+          });
+        }
       },
       
-      archiveConversation: (id) => {
-        set((state) => ({
-          conversations: state.conversations.map(conv =>
-            conv.id === id ? { ...conv, isArchived: !conv.isArchived } : conv
-          ),
-        }));
+      archiveConversation: async (id) => {
+        try {
+          const response = await apiToggleArchive(id);
+          if (!response.success) {
+            throw new Error(response.message || 'Failed to update archive state');
+          }
+
+          const nextArchivedState = response.data?.isArchived;
+
+          set((state) => {
+            return {
+              conversations: sortConversations(
+                state.conversations.map((conv) =>
+                  conv.id === id
+                    ? { ...conv, isArchived: nextArchivedState ?? !conv.isArchived }
+                    : conv
+                )
+              ),
+            };
+          });
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update archive state',
+          });
+        }
       },
       
       muteConversation: (id) => {
@@ -505,7 +657,7 @@ export const useChatStore = create<ChatState>()(
             return conv;
           });
           
-          return { messagesByConversation: newMap, conversations };
+          return { messagesByConversation: newMap, conversations: sortConversations(conversations) };
         });
       },
       
@@ -555,9 +707,7 @@ export const useChatStore = create<ChatState>()(
         
         // Sort: pinned first, then by updatedAt
         return filtered.sort((a, b) => {
-          if (a.isPinned && !b.isPinned) return -1;
-          if (!a.isPinned && b.isPinned) return 1;
-          return b.updatedAt.getTime() - a.updatedAt.getTime();
+          return compareConversations(a, b);
         });
       },
     }),

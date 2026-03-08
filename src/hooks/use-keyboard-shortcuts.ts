@@ -95,7 +95,7 @@ export function useKeyboardShortcuts() {
         selectedConversationId
       ) {
         e.preventDefault();
-        useChatStore.getState().archiveConversation(selectedConversationId);
+        void useChatStore.getState().archiveConversation(selectedConversationId);
         return;
       }
       
@@ -106,7 +106,7 @@ export function useKeyboardShortcuts() {
         selectedConversationId
       ) {
         e.preventDefault();
-        useChatStore.getState().pinConversation(selectedConversationId);
+        void useChatStore.getState().pinConversation(selectedConversationId);
         return;
       }
       
