@@ -6,18 +6,26 @@ import type {
 } from '@/lib/types/pubsub';
 import { debugPubSub } from '@/lib/pubsub/debug';
 
-type MessageHandler = (payload: PubSubClientPayload, envelope: Extract<PubSubTransportEnvelope, { type: 'message' }>) => void;
+type MessageEnvelope = Extract<PubSubTransportEnvelope, { type: 'message' }>;
+type MessageHandler = (
+  payload: PubSubClientPayload,
+  envelope: MessageEnvelope
+) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 interface PubSubClientConfig {
   url?: string;
+  reconnectDelay?: number;
+  maxReconnectDelay?: number;
 }
 
-const DEFAULT_PUBSUB_STREAM_PATH = '/api/pubsub/stream';
+const DEFAULT_PUBSUB_URL = 'wss://pubsub-service.botmastersender.com';
 
 class PubSubClient {
   private readonly baseUrl: string;
-  private eventSource: EventSource | null = null;
+  private readonly reconnectDelay: number;
+  private readonly maxReconnectDelay: number;
+  private ws: WebSocket | null = null;
   private messageHandlers: MessageHandler[] = [];
   private connectionHandlers: ConnectionHandler[] = [];
   private subscribedChannel: string | null = null;
@@ -25,46 +33,32 @@ class PubSubClient {
   private isConnected = false;
   private clientId: string | null = null;
   private subscriberId: string | null = null;
+  private reconnectAttempts = 0;
+  private reconnectTimer: number | null = null;
 
   constructor(config: PubSubClientConfig = {}) {
-    this.baseUrl = config.url || DEFAULT_PUBSUB_STREAM_PATH;
+    this.baseUrl =
+      config.url || process.env.NEXT_PUBLIC_PUBSUB_URL || DEFAULT_PUBSUB_URL;
+    this.reconnectDelay = config.reconnectDelay ?? 2000;
+    this.maxReconnectDelay = config.maxReconnectDelay ?? 30000;
   }
 
-  private resolveBaseUrl(): URL {
-    const fallbackUrl = new URL(DEFAULT_PUBSUB_STREAM_PATH, window.location.origin);
+  private resolveSocketUrl(): string {
+    if (typeof window === 'undefined') {
+      return this.baseUrl;
+    }
 
     try {
-      const configuredUrl = new URL(this.baseUrl, window.location.origin);
-
-      if (configuredUrl.protocol === 'ws:' || configuredUrl.protocol === 'wss:') {
-        return fallbackUrl;
+      const url = new URL(this.baseUrl, window.location.origin);
+      if (url.protocol === 'http:') {
+        url.protocol = 'ws:';
+      } else if (url.protocol === 'https:') {
+        url.protocol = 'wss:';
       }
-
-      if (
-        configuredUrl.protocol !== 'http:' &&
-        configuredUrl.protocol !== 'https:'
-      ) {
-        return fallbackUrl;
-      }
-
-      if (configuredUrl.origin !== window.location.origin) {
-        return fallbackUrl;
-      }
-
-      return configuredUrl;
+      return url.toString();
     } catch {
-      return fallbackUrl;
+      return this.baseUrl;
     }
-  }
-
-  private buildStreamUrl(): string | null {
-    if (!this.subscribedChannel) {
-      return null;
-    }
-
-    const url = this.resolveBaseUrl();
-    url.searchParams.set('channel', this.subscribedChannel);
-    return url.toString();
   }
 
   private emitConnection(connected: boolean): void {
@@ -81,9 +75,16 @@ class PubSubClient {
     switch (envelope.type) {
       case 'connected':
         this.clientId = envelope.clientId || null;
+        debugPubSub('PubSub connected envelope received', {
+          clientId: this.clientId,
+        });
         break;
       case 'subscribed':
         this.subscriberId = envelope.subscriberId;
+        debugPubSub('PubSub subscribed envelope received', {
+          channel: envelope.channel,
+          subscriberId: envelope.subscriberId,
+        });
         break;
       case 'message':
         this.messageHandlers.forEach((handler) => {
@@ -102,10 +103,40 @@ class PubSubClient {
     }
   }
 
-  private closeSource(): void {
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private attemptReconnect(): void {
+    if (!this.shouldReconnect || typeof window === 'undefined') {
+      return;
+    }
+
+    this.reconnectAttempts += 1;
+    const delay = Math.min(
+      this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
+
+    debugPubSub('Scheduling PubSub reconnect', {
+      delay,
+      reconnectAttempts: this.reconnectAttempts,
+      channel: this.subscribedChannel,
+    });
+
+    this.clearReconnectTimer();
+    this.reconnectTimer = window.setTimeout(() => {
+      this.connect();
+    }, delay);
+  }
+
+  private closeSocket(): void {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
     }
   }
 
@@ -114,44 +145,48 @@ class PubSubClient {
       return;
     }
 
-    const streamUrl = this.buildStreamUrl();
-    if (!streamUrl) {
-      debugPubSub('Skipped connect because no stream URL could be built', {
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      debugPubSub('Skipped connect because WebSocket is already active', {
         channel: this.subscribedChannel,
-      });
-      return;
-    }
-
-    if (this.eventSource && (this.eventSource.readyState === EventSource.OPEN || this.eventSource.readyState === EventSource.CONNECTING)) {
-      debugPubSub('Skipped connect because EventSource is already active', {
-        channel: this.subscribedChannel,
-        readyState: this.eventSource.readyState,
+        readyState: this.ws.readyState,
       });
       return;
     }
 
     this.shouldReconnect = true;
-    this.closeSource();
-    debugPubSub('Opening EventSource connection', {
+    this.clearReconnectTimer();
+    this.closeSocket();
+
+    const socketUrl = this.resolveSocketUrl();
+    debugPubSub('Opening WebSocket connection', {
+      socketUrl,
       channel: this.subscribedChannel,
-      streamUrl,
     });
 
-    const eventSource = new EventSource(streamUrl, { withCredentials: true });
-    this.eventSource = eventSource;
+    const ws = new WebSocket(socketUrl);
+    this.ws = ws;
 
-    eventSource.onopen = () => {
+    ws.onopen = () => {
       this.isConnected = true;
-      debugPubSub('EventSource opened', {
+      this.reconnectAttempts = 0;
+      debugPubSub('WebSocket opened', {
         channel: this.subscribedChannel,
       });
       this.emitConnection(true);
+
+      if (this.subscribedChannel) {
+        this.subscribe(this.subscribedChannel);
+      }
     };
 
-    eventSource.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const envelope = JSON.parse(event.data) as PubSubTransportEnvelope;
-        debugPubSub('EventSource message received', {
+        debugPubSub('WebSocket message received', {
           channel: this.subscribedChannel,
           envelopeType: envelope.type,
         });
@@ -161,36 +196,59 @@ class PubSubClient {
       }
     };
 
-    eventSource.onerror = () => {
+    ws.onclose = () => {
       this.isConnected = false;
-      debugPubSub('EventSource error fired', {
+      this.clientId = null;
+      this.subscriberId = null;
+      debugPubSub('WebSocket closed', {
         channel: this.subscribedChannel,
-        readyState: eventSource.readyState,
       });
       this.emitConnection(false);
 
-      if (!this.shouldReconnect) {
-        this.closeSource();
+      if (this.shouldReconnect) {
+        this.attemptReconnect();
       }
+    };
+
+    ws.onerror = () => {
+      debugPubSub('WebSocket error fired', {
+        channel: this.subscribedChannel,
+      });
     };
   }
 
   subscribe(channel: string): void {
     this.subscribedChannel = channel;
     debugPubSub('Subscribing to channel', { channel });
-    this.connect();
+
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.connect();
+      return;
+    }
+
+    this.ws.send(
+      JSON.stringify({
+        type: 'subscribe',
+        channel,
+      })
+    );
   }
 
   unsubscribe(): void {
     debugPubSub('Unsubscribing from channel', {
       channel: this.subscribedChannel,
     });
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(
+        JSON.stringify({
+          type: 'unsubscribe',
+        })
+      );
+    }
+
     this.subscribedChannel = null;
-    this.clientId = null;
     this.subscriberId = null;
-    this.isConnected = false;
-    this.emitConnection(false);
-    this.closeSource();
   }
 
   onMessage(handler: MessageHandler): void {
@@ -198,7 +256,9 @@ class PubSubClient {
   }
 
   offMessage(handler: MessageHandler): void {
-    this.messageHandlers = this.messageHandlers.filter((existing) => existing !== handler);
+    this.messageHandlers = this.messageHandlers.filter(
+      (existing) => existing !== handler
+    );
   }
 
   onConnectionChange(handler: ConnectionHandler): void {
@@ -206,19 +266,29 @@ class PubSubClient {
   }
 
   offConnectionChange(handler: ConnectionHandler): void {
-    this.connectionHandlers = this.connectionHandlers.filter((existing) => existing !== handler);
+    this.connectionHandlers = this.connectionHandlers.filter(
+      (existing) => existing !== handler
+    );
   }
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this.clearReconnectTimer();
     debugPubSub('Disconnect requested', {
       channel: this.subscribedChannel,
     });
     this.unsubscribe();
+    this.isConnected = false;
+    this.emitConnection(false);
+    this.closeSocket();
   }
 
   isConnectionOpen(): boolean {
-    return this.isConnected;
+    return (
+      this.isConnected &&
+      this.ws !== null &&
+      this.ws.readyState === WebSocket.OPEN
+    );
   }
 
   getStatus() {
@@ -227,6 +297,7 @@ class PubSubClient {
       clientId: this.clientId,
       subscriberId: this.subscriberId,
       channel: this.subscribedChannel,
+      reconnectAttempts: this.reconnectAttempts,
     };
   }
 }

@@ -24,6 +24,37 @@ import type {
 } from '@/lib/types/pubsub';
 
 const log = new Logger('PubSub');
+const DEFAULT_EXTERNAL_PUBSUB_SERVICE_URL =
+  'http://pubsub-service.botmastersender.com';
+
+function normalizePubSubServiceUrl(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'ws:') {
+      url.protocol = 'http:';
+    } else if (url.protocol === 'wss:') {
+      url.protocol = 'https:';
+    }
+
+    url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+function getExternalPubSubServiceUrl(): string | null {
+  return normalizePubSubServiceUrl(
+    process.env.PUBSUB_SERVICE_URL ||
+      process.env.PUBSUB_URL ||
+      process.env.NEXT_PUBLIC_PUBSUB_URL ||
+      DEFAULT_EXTERNAL_PUBSUB_SERVICE_URL
+  );
+}
 
 // Callback type
 export type PubSubCallback = (event: PubSubEvent) => void;
@@ -42,12 +73,11 @@ export async function publishToUser(
   userId: string | number | bigint,
   event: PubSubEvent
 ): Promise<void> {
+  const channel = getChannelName(userId);
+
   try {
-    const channel = getChannelName(userId);
-    const message = JSON.stringify(event);
-    
     const redis = await getRedisClient();
-    await redis.publish(channel, message);
+    await redis.publish(channel, JSON.stringify(event));
 
     log.info('Published event', {
       type: event.type,
@@ -55,7 +85,51 @@ export async function publishToUser(
       userId: String(userId),
     });
   } catch (error) {
-    log.error('Publish error', { error });
+    log.error('Local publish error', { error, channel, userId: String(userId) });
+  }
+
+  const externalPubSubUrl = getExternalPubSubServiceUrl();
+  if (!externalPubSubUrl) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${externalPubSubUrl}/api/publish/${encodeURIComponent(channel)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Source': 'whats91-chat',
+          'X-User-ID': String(userId),
+        },
+        body: JSON.stringify({
+          payload: event,
+        }),
+        cache: 'no-store',
+      }
+    );
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText}: ${responseText}`
+      );
+    }
+
+    log.info('Published event to external pubsub service', {
+      type: event.type,
+      channel,
+      userId: String(userId),
+      url: externalPubSubUrl,
+    });
+  } catch (error) {
+    log.error('External pubsub publish error', {
+      error: error instanceof Error ? error.message : error,
+      channel,
+      userId: String(userId),
+      url: externalPubSubUrl,
+    });
   }
 }
 
