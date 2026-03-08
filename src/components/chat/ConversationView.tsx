@@ -1033,30 +1033,6 @@ const WHATSAPP_VOICE_RECORDING_FORMATS = [
     extension: 'ogg',
     label: 'OGG (Opus)',
   },
-  {
-    mimeType: 'audio/ogg',
-    normalizedMimeType: 'audio/ogg',
-    extension: 'ogg',
-    label: 'OGG',
-  },
-  {
-    mimeType: 'audio/mp4',
-    normalizedMimeType: 'audio/mp4',
-    extension: 'm4a',
-    label: 'M4A',
-  },
-  {
-    mimeType: 'audio/aac',
-    normalizedMimeType: 'audio/aac',
-    extension: 'aac',
-    label: 'AAC',
-  },
-  {
-    mimeType: 'audio/mpeg',
-    normalizedMimeType: 'audio/mpeg',
-    extension: 'mp3',
-    label: 'MP3',
-  },
 ] as const;
 
 type VoiceRecordingFormat = (typeof WHATSAPP_VOICE_RECORDING_FORMATS)[number];
@@ -1304,7 +1280,7 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
     if (!format) {
       toast({
         title: 'Voice format unsupported',
-        description: 'This browser cannot record in a WhatsApp-compatible audio format. Use Safari or Firefox, or attach an audio file manually.',
+        description: 'This browser cannot record `.ogg` Opus voice notes required by WhatsApp Cloud API. Use a browser that supports OGG Opus recording or attach an audio file manually.',
         variant: 'destructive',
       });
       return;

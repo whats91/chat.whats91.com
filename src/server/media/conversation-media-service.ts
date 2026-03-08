@@ -734,7 +734,12 @@ export async function resolvePendingConversationMediaUpload(params: {
     };
   }
 
-  const signedUrl = await getWasabiSignedUrl(record.wasabi_path, 3600);
+  const signedUrl = await getWasabiSignedUrl(record.wasabi_path, 3600, {
+    responseContentType: record.mime_type,
+    responseContentDisposition: record.original_filename
+      ? `inline; filename="${String(record.original_filename).replace(/["\r\n]/g, '_')}"`
+      : null,
+  });
 
   return {
     success: true,
@@ -794,7 +799,12 @@ export async function resolveForwardableConversationMedia(params: {
     };
   }
 
-  const signedUrl = await getWasabiSignedUrl(cacheResult.record.wasabi_path, 3600);
+  const signedUrl = await getWasabiSignedUrl(cacheResult.record.wasabi_path, 3600, {
+    responseContentType: cacheResult.record.mime_type,
+    responseContentDisposition: cacheResult.record.original_filename
+      ? `inline; filename="${String(cacheResult.record.original_filename).replace(/["\r\n]/g, '_')}"`
+      : null,
+  });
 
   return {
     success: true,

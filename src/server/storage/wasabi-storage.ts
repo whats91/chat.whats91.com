@@ -159,12 +159,23 @@ export async function wasabiObjectExists(wasabiPath: string): Promise<boolean> {
   }
 }
 
-export async function getWasabiSignedUrl(wasabiPath: string, expiresIn = 3600): Promise<string> {
+export async function getWasabiSignedUrl(
+  wasabiPath: string,
+  expiresIn = 3600,
+  options: {
+    responseContentType?: string | null;
+    responseContentDisposition?: string | null;
+  } = {}
+): Promise<string> {
   const { client, config } = getClient();
 
   return getS3SignedUrl(client, new GetObjectCommand({
     Bucket: config.bucket,
     Key: wasabiPath,
+    ...(options.responseContentType ? { ResponseContentType: options.responseContentType } : {}),
+    ...(options.responseContentDisposition
+      ? { ResponseContentDisposition: options.responseContentDisposition }
+      : {}),
   }), { expiresIn });
 }
 
