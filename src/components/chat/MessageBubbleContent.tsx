@@ -23,6 +23,7 @@ import {
 interface MessageBubbleContentProps {
   message: Message;
   isOwn: boolean;
+  onOpenMedia?: (message: Message) => void;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -194,15 +195,19 @@ function AttachmentFallback({
 }
 
 function ImageContent({
+  message,
   mediaUrl,
   caption,
   isOwn,
   sticker = false,
+  onOpenMedia,
 }: {
+  message: Message;
   mediaUrl: string | null;
   caption: string | null;
   isOwn: boolean;
   sticker?: boolean;
+  onOpenMedia?: (message: Message) => void;
 }) {
   if (!isRenderableMediaUrl(mediaUrl)) {
     return (
@@ -218,32 +223,56 @@ function ImageContent({
 
   return (
     <div className={cn('space-y-2', sticker ? STICKER_MEDIA_CARD_CLASS : STANDARD_MEDIA_CARD_CLASS)}>
-      <div className="overflow-hidden rounded-md bg-black/10">
-        <AspectRatio ratio={sticker ? 1 : 4 / 3}>
-          <img
-            src={mediaUrl}
-            alt={caption || (sticker ? 'Sticker' : 'Image')}
-            loading="lazy"
-            className={cn(
-              'h-full w-full',
-              sticker ? 'object-contain p-2' : 'object-cover'
-            )}
-          />
-        </AspectRatio>
-      </div>
+      {onOpenMedia ? (
+        <button
+          type="button"
+          className="block w-full overflow-hidden rounded-md bg-black/10"
+          onClick={() => onOpenMedia(message)}
+        >
+          <AspectRatio ratio={sticker ? 1 : 4 / 3}>
+            <img
+              src={mediaUrl}
+              alt={caption || (sticker ? 'Sticker' : 'Image')}
+              loading="lazy"
+              className={cn(
+                'h-full w-full',
+                sticker ? 'object-contain p-2' : 'object-cover'
+              )}
+            />
+          </AspectRatio>
+        </button>
+      ) : (
+        <div className="overflow-hidden rounded-md bg-black/10">
+          <AspectRatio ratio={sticker ? 1 : 4 / 3}>
+            <img
+              src={mediaUrl}
+              alt={caption || (sticker ? 'Sticker' : 'Image')}
+              loading="lazy"
+              className={cn(
+                'h-full w-full',
+                sticker ? 'object-contain p-2' : 'object-cover'
+              )}
+            />
+          </AspectRatio>
+        </div>
+      )}
       {caption && <RichText text={caption} className="text-inherit" />}
     </div>
   );
 }
 
 function VideoContent({
+  message,
   mediaUrl,
   caption,
   isOwn,
+  onOpenMedia,
 }: {
+  message: Message;
   mediaUrl: string | null;
   caption: string | null;
   isOwn: boolean;
+  onOpenMedia?: (message: Message) => void;
 }) {
   if (!isRenderableMediaUrl(mediaUrl)) {
     return (
@@ -259,7 +288,19 @@ function VideoContent({
 
   return (
     <div className={cn('space-y-2', STANDARD_MEDIA_CARD_CLASS)}>
-      <video src={mediaUrl} controls preload="metadata" className="max-h-[360px] w-full rounded-md bg-black" />
+      <div className="relative">
+        <video src={mediaUrl} controls preload="metadata" className="max-h-[360px] w-full rounded-md bg-black" />
+        {onOpenMedia ? (
+          <button
+            type="button"
+            className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white"
+            onClick={() => onOpenMedia(message)}
+          >
+            <ExternalLink className="h-3 w-3" />
+            <span>Open</span>
+          </button>
+        ) : null}
+      </div>
       {caption && <RichText text={caption} className="text-inherit" />}
     </div>
   );
@@ -641,19 +682,19 @@ function InteractiveContent({
   );
 }
 
-export function MessageBubbleContent({ message, isOwn }: MessageBubbleContentProps) {
+export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBubbleContentProps) {
   const resolved = resolveMessageForRendering(message);
   const caption = getMessageCaption(resolved.content, resolved.mediaCaption);
 
   switch (resolved.type) {
     case 'image':
-      return <ImageContent mediaUrl={resolved.mediaUrl} caption={caption} isOwn={isOwn} />;
+      return <ImageContent message={message} mediaUrl={resolved.mediaUrl} caption={caption} isOwn={isOwn} onOpenMedia={onOpenMedia} />;
 
     case 'sticker':
-      return <ImageContent mediaUrl={resolved.mediaUrl} caption={null} isOwn={isOwn} sticker />;
+      return <ImageContent message={message} mediaUrl={resolved.mediaUrl} caption={null} isOwn={isOwn} sticker onOpenMedia={onOpenMedia} />;
 
     case 'video':
-      return <VideoContent mediaUrl={resolved.mediaUrl} caption={caption} isOwn={isOwn} />;
+      return <VideoContent message={message} mediaUrl={resolved.mediaUrl} caption={caption} isOwn={isOwn} onOpenMedia={onOpenMedia} />;
 
     case 'audio':
       return <AudioContent mediaUrl={resolved.mediaUrl} label={resolved.mediaFilename || 'Audio message'} isOwn={isOwn} />;

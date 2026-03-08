@@ -122,3 +122,18 @@ export async function findCloudApiSetupByPhoneNumberId(
 
   return normalizeCloudApiSetup(rows[0]);
 }
+
+export async function findDefaultCloudApiSetupByUser(
+  userId: string
+): Promise<CloudApiSetupRecord | null> {
+  const rows = await db.$queryRawUnsafe<CloudApiSetupRow[]>(
+    `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
+     FROM cloud_api_setup
+     WHERE user_id = ? AND phone_number_id IS NOT NULL
+     ORDER BY access_chats DESC, updated_at DESC, id DESC
+     LIMIT 1`,
+    userId
+  );
+
+  return normalizeCloudApiSetup(rows[0]);
+}

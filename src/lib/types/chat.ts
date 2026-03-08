@@ -385,6 +385,40 @@ export interface ConversationDetailResponse {
   };
 }
 
+export interface ConversationTarget {
+  id: string;
+  source: 'conversation' | 'contact';
+  conversationId: string | null;
+  phone: string;
+  displayName: string;
+  contactName: string | null;
+  lastMessageAt: Date | string | null;
+}
+
+export interface ConversationTargetListResponse {
+  success: boolean;
+  message: string;
+  data: {
+    targets: ConversationTarget[];
+  } | null;
+}
+
+export interface StartConversationRequest {
+  phone: string;
+  contactName?: string | null;
+}
+
+export interface StartConversationResponse {
+  success: boolean;
+  message: string;
+  data: {
+    conversationId: string;
+    displayName: string;
+    contactPhone: string;
+    contactName: string | null;
+  } | null;
+}
+
 // ========================================
 // WHATSAPP API TYPES
 // ========================================
@@ -558,6 +592,7 @@ export interface SendMessageRequest {
   messageContent?: string;
   mediaUrl?: string;
   mediaUploadToken?: string;
+  forwardSourceMessageId?: string;
   mediaCaption?: string;
   replyToMessageId?: string;
   interactiveData?: Record<string, unknown>;

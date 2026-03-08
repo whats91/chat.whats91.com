@@ -746,6 +746,67 @@ export async function resolvePendingConversationMediaUpload(params: {
   };
 }
 
+export async function resolveForwardableConversationMedia(params: {
+  userId: string;
+  messageId: string;
+}): Promise<{
+  success: boolean;
+  status: number;
+  message: string;
+  signedUrl?: string;
+  proxyUrl?: string;
+  mimeType?: string | null;
+  originalFilename?: string | null;
+}> {
+  const { userId, messageId } = params;
+
+  if (!isWasabiConfigured()) {
+    return {
+      success: false,
+      status: 500,
+      message: 'Wasabi storage is not configured',
+    };
+  }
+
+  const message = await getMessageWithConversation(messageId, userId);
+  if (!message) {
+    return {
+      success: false,
+      status: 404,
+      message: 'Source message not found',
+    };
+  }
+
+  if (!MEDIA_MESSAGE_TYPES.has(message.message_type)) {
+    return {
+      success: false,
+      status: 400,
+      message: 'Only media messages can be forwarded from the viewer',
+    };
+  }
+
+  const cacheResult = await downloadAndCacheConversationMedia({ userId, messageId });
+  if (!cacheResult.success || !cacheResult.record) {
+    return {
+      success: false,
+      status: cacheResult.status,
+      message: cacheResult.message,
+    };
+  }
+
+  const signedUrl = await getWasabiSignedUrl(cacheResult.record.wasabi_path, 3600);
+
+  return {
+    success: true,
+    status: 200,
+    message: 'Forwardable media resolved',
+    signedUrl,
+    proxyUrl: buildConversationMediaProxyUrl(messageId),
+    mimeType: cacheResult.record.mime_type,
+    originalFilename: cacheResult.record.original_filename,
+  };
+}
+
 export async function finalizePendingConversationMediaUpload(params: {
   userId: string;
   uploadToken: string;

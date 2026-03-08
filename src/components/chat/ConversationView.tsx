@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
+import { MediaLightbox } from '@/components/chat/MediaLightbox';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,7 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
+import { sendMessage as sendConversationMessage, startConversation } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
+import { toast } from '@/hooks/use-toast';
+import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,7 +49,7 @@ import {
   Info,
   Trash2,
 } from 'lucide-react';
-import type { Message, Conversation } from '@/lib/types/chat';
+import type { Message, Conversation, ConversationTarget, SendMessageRequest } from '@/lib/types/chat';
 import { format, isToday, isYesterday } from 'date-fns';
 
 interface ConversationViewProps {
@@ -62,12 +67,80 @@ export function ConversationView({
     conversations,
     getMessages,
     sendMessage,
+    loadConversations,
+    selectConversation,
     toggleRightPanel,
     isRightPanelOpen,
   } = useChatStore();
+  const [viewerMessage, setViewerMessage] = useState<Message | null>(null);
+  const [isForwardPickerOpen, setIsForwardPickerOpen] = useState(false);
   
   const conversation = conversations.find(c => c.id === conversationId);
   const messages = getMessages(conversationId);
+  const currentUserId = getCurrentUserId();
+
+  const handleForwardSelect = async (target: ConversationTarget) => {
+    if (!viewerMessage) {
+      throw new Error('No media is selected for forwarding');
+    }
+
+    const resolved = resolveMessageForRendering(viewerMessage);
+    if (!['image', 'video', 'sticker'].includes(resolved.type)) {
+      throw new Error('This media type cannot be forwarded from the viewer');
+    }
+
+    let targetConversationId = target.conversationId;
+    if (!targetConversationId) {
+      const startResponse = await startConversation({
+        phone: target.phone,
+        contactName: target.contactName,
+      });
+
+      if (!startResponse.success || !startResponse.data) {
+        toast({
+          title: 'Unable to open contact',
+          description: startResponse.message || 'The target conversation could not be created.',
+          variant: 'destructive',
+        });
+        throw new Error(startResponse.message || 'Unable to open contact');
+      }
+
+      targetConversationId = startResponse.data.conversationId;
+    }
+
+    const caption =
+      viewerMessage.mediaCaption?.trim() ||
+      (viewerMessage.content && !/^\[[^\]]+\]$/.test(viewerMessage.content.trim())
+        ? viewerMessage.content.trim()
+        : undefined);
+
+    const payload: SendMessageRequest = {
+      messageType: resolved.type,
+      messageContent: caption,
+      mediaCaption: resolved.type === 'sticker' ? undefined : caption,
+      forwardSourceMessageId: viewerMessage.id,
+    };
+
+    const sendResponse = await sendConversationMessage(targetConversationId, payload);
+    if (!sendResponse.success) {
+      toast({
+        title: 'Forward failed',
+        description: sendResponse.message || 'The media could not be forwarded.',
+        variant: 'destructive',
+      });
+      throw new Error(sendResponse.message || 'Forward failed');
+    }
+
+    await loadConversations();
+    await selectConversation(targetConversationId);
+    setIsForwardPickerOpen(false);
+    setViewerMessage(null);
+
+    toast({
+      title: 'Media forwarded',
+      description: `Sent to ${target.displayName}.`,
+    });
+  };
   
   if (!conversation) {
     return (
@@ -90,13 +163,40 @@ export function ConversationView({
       
       {/* Messages - wrapper div with overflow-hidden is critical for ScrollArea */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <MessageList messages={messages} currentUserId={getCurrentUserId()} />
+        <MessageList
+          messages={messages}
+          currentUserId={currentUserId}
+          onOpenMedia={(message) => setViewerMessage(message)}
+        />
       </div>
       
       {/* Composer - fixed at bottom */}
       <MessageComposer
         conversationId={conversationId}
         onSend={(content) => sendMessage(conversationId, content)}
+      />
+
+      <MediaLightbox
+        open={Boolean(viewerMessage)}
+        message={viewerMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsForwardPickerOpen(false);
+            setViewerMessage(null);
+          }
+        }}
+        onForward={(message) => {
+          setViewerMessage(message);
+          setIsForwardPickerOpen(true);
+        }}
+      />
+
+      <ConversationTargetPickerDialog
+        open={isForwardPickerOpen}
+        onOpenChange={setIsForwardPickerOpen}
+        title="Forward Media"
+        description="Select a contact or recent conversation."
+        onSelect={handleForwardSelect}
       />
     </div>
   );
@@ -223,9 +323,10 @@ function ConversationHeader({
 interface MessageListProps {
   messages: Message[];
   currentUserId: string;
+  onOpenMedia: (message: Message) => void;
 }
 
-function MessageList({ messages, currentUserId }: MessageListProps) {
+function MessageList({ messages, currentUserId, onOpenMedia }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   
   // Auto-scroll to bottom when new messages arrive
@@ -272,8 +373,8 @@ function MessageList({ messages, currentUserId }: MessageListProps) {
       <div className="space-y-4">
         {groupedMessages.map((group, groupIndex) => (
           <div key={groupIndex}>
-            <div className="flex justify-center mb-4">
-              <span className="px-3 py-1 bg-muted rounded-full text-xs text-muted-foreground">
+            <div className="sticky top-0 z-10 -mx-4 mb-4 flex justify-center px-4 py-2">
+              <span className="rounded-full bg-muted/95 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
                 {formatDateHeader(group.date)}
               </span>
             </div>
@@ -282,6 +383,7 @@ function MessageList({ messages, currentUserId }: MessageListProps) {
                 key={message.id}
                 message={message}
                 isOwn={message.senderId === currentUserId}
+                onOpenMedia={onOpenMedia}
                 showTimestamp={
                   messageIndex === group.messages.length - 1 ||
                   group.messages[messageIndex + 1]?.senderId !== message.senderId ||
@@ -302,10 +404,11 @@ function MessageList({ messages, currentUserId }: MessageListProps) {
 interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
+  onOpenMedia: (message: Message) => void;
   showTimestamp: boolean;
 }
 
-function MessageBubble({ message, isOwn, showTimestamp }: MessageBubbleProps) {
+function MessageBubble({ message, isOwn, onOpenMedia, showTimestamp }: MessageBubbleProps) {
   const isSending = message.status === 'pending';
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
@@ -333,7 +436,7 @@ function MessageBubble({ message, isOwn, showTimestamp }: MessageBubbleProps) {
             : 'bg-muted'
         )}
       >
-        <MessageBubbleContent message={message} isOwn={isOwn} />
+        <MessageBubbleContent message={message} isOwn={isOwn} onOpenMedia={onOpenMedia} />
         {showTimestamp && (
           <div
             className={cn(

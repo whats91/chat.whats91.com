@@ -29,11 +29,13 @@ import {
   mapConversationMessageStatus 
 } from '../whatsapp/message-sender';
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
-import { findCloudApiSetupByUserAndPhoneNumberId } from '../db/cloud-api-setup';
+import { findCloudApiSetupByUserAndPhoneNumberId, findDefaultCloudApiSetupByUser } from '../db/cloud-api-setup';
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
 import { buildConversationMediaProxyUrl, MEDIA_MESSAGE_TYPES } from '@/lib/media/conversation-media';
+import { db } from '@/lib/db';
 import {
   cleanupPendingConversationMediaUpload,
+  resolveForwardableConversationMedia,
   finalizePendingConversationMediaUpload,
   resolvePendingConversationMediaUpload,
 } from '@/server/media/conversation-media-service';
@@ -267,6 +269,284 @@ export async function getConversations({
   }
 }
 
+export interface ConversationTargetItem {
+  id: string;
+  source: 'conversation' | 'contact';
+  conversationId: string | null;
+  phone: string;
+  displayName: string;
+  contactName: string | null;
+  lastMessageAt: Date | null;
+}
+
+interface ConversationTargetRow {
+  id: number;
+  contact_phone: string;
+  contact_name: string | null;
+  last_message_at: Date | null;
+  updated_at: Date | null;
+}
+
+interface ContactTargetRow {
+  id: number;
+  phone: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  updated_at: Date | null;
+}
+
+function normalizeTargetName(firstName: string | null, lastName: string | null): string | null {
+  const parts = [firstName, lastName].filter((part): part is string => Boolean(part && part.trim()));
+  return parts.length > 0 ? parts.join(' ').trim() : null;
+}
+
+export async function getConversationTargets({
+  userId,
+  search,
+  limit = 50,
+}: {
+  userId: string;
+  search?: string;
+  limit?: number;
+}) {
+  try {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const trimmedSearch = search?.trim();
+
+    let conversationsSql = `
+      SELECT id, contact_phone, contact_name, last_message_at, updated_at
+      FROM conversations
+      WHERE user_id = ? AND is_archived = false
+    `;
+    const conversationParams: unknown[] = [userId];
+
+    if (trimmedSearch) {
+      const searchPattern = `%${trimmedSearch}%`;
+      conversationsSql += ` AND (contact_name LIKE ? OR contact_phone LIKE ?)`;
+      conversationParams.push(searchPattern, searchPattern);
+    }
+
+    conversationsSql += ` ORDER BY COALESCE(last_message_at, updated_at) DESC LIMIT ?`;
+    conversationParams.push(safeLimit);
+
+    const conversationRows = await queryConversationsDb<ConversationTargetRow>(
+      conversationsSql,
+      conversationParams
+    );
+
+    let contactsSql = `
+      SELECT id, phone, first_name, last_name, updated_at
+      FROM contacts
+      WHERE user_id = ? AND phone IS NOT NULL AND phone != ''
+    `;
+    const contactParams: unknown[] = [userId];
+
+    if (trimmedSearch) {
+      const searchPattern = `%${trimmedSearch}%`;
+      contactsSql += ` AND (phone LIKE ? OR first_name LIKE ? OR last_name LIKE ?)`;
+      contactParams.push(searchPattern, searchPattern, searchPattern);
+    }
+
+    contactsSql += ` ORDER BY updated_at DESC LIMIT ?`;
+    contactParams.push(safeLimit);
+
+    const contactRows = await db.$queryRawUnsafe<ContactTargetRow[]>(
+      contactsSql,
+      ...contactParams
+    );
+
+    const targetMap = new Map<string, ConversationTargetItem>();
+
+    for (const row of conversationRows) {
+      const normalizedPhone = normalizeConversationPhone(row.contact_phone);
+      if (!normalizedPhone) {
+        continue;
+      }
+
+      targetMap.set(normalizedPhone, {
+        id: `conversation:${row.id}`,
+        source: 'conversation',
+        conversationId: String(row.id),
+        phone: normalizedPhone,
+        displayName: getDisplayName(row.contact_name, normalizedPhone),
+        contactName: row.contact_name,
+        lastMessageAt: row.last_message_at || row.updated_at,
+      });
+    }
+
+    for (const row of contactRows) {
+      const normalizedPhone = normalizeConversationPhone(row.phone || '');
+      if (!normalizedPhone) {
+        continue;
+      }
+
+      const contactName = normalizeTargetName(row.first_name, row.last_name);
+      const existing = targetMap.get(normalizedPhone);
+
+      if (existing) {
+        if (!existing.contactName && contactName) {
+          existing.contactName = contactName;
+          existing.displayName = contactName;
+        }
+        continue;
+      }
+
+      targetMap.set(normalizedPhone, {
+        id: `contact:${row.id}`,
+        source: 'contact',
+        conversationId: null,
+        phone: normalizedPhone,
+        displayName: getDisplayName(contactName, normalizedPhone),
+        contactName,
+        lastMessageAt: row.updated_at,
+      });
+    }
+
+    const targets = Array.from(targetMap.values())
+      .sort((left, right) => {
+        if (left.conversationId && !right.conversationId) return -1;
+        if (!left.conversationId && right.conversationId) return 1;
+
+        const leftTime = left.lastMessageAt ? new Date(left.lastMessageAt).getTime() : 0;
+        const rightTime = right.lastMessageAt ? new Date(right.lastMessageAt).getTime() : 0;
+        if (leftTime !== rightTime) {
+          return rightTime - leftTime;
+        }
+
+        return left.displayName.localeCompare(right.displayName);
+      })
+      .slice(0, safeLimit);
+
+    return {
+      success: true,
+      message: 'Conversation targets retrieved successfully',
+      data: {
+        targets,
+      },
+    };
+  } catch (error) {
+    log.error('getConversationTargets error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to retrieve conversation targets',
+      data: null,
+    };
+  }
+}
+
+export async function startConversation({
+  userId,
+  phone,
+  contactName,
+}: {
+  userId: string;
+  phone: string;
+  contactName?: string | null;
+}) {
+  try {
+    const normalizedPhone = normalizeConversationPhone(phone);
+    if (!normalizedPhone) {
+      return {
+        success: false,
+        message: 'A valid phone number is required',
+        data: null,
+      };
+    }
+
+    const trimmedContactName = contactName?.trim() || null;
+
+    let [conversation] = await queryConversationsDb<any>(
+      `SELECT id, contact_phone, contact_name
+       FROM conversations
+       WHERE user_id = ? AND contact_phone = ?
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [userId, normalizedPhone]
+    );
+
+    if (conversation) {
+      if (trimmedContactName && !conversation.contact_name) {
+        await executeConversationsDb(
+          `UPDATE conversations
+           SET contact_name = ?, is_archived = false, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [trimmedContactName, conversation.id]
+        );
+        conversation.contact_name = trimmedContactName;
+      } else {
+        await executeConversationsDb(
+          `UPDATE conversations
+           SET is_archived = false, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [conversation.id]
+        );
+      }
+
+      return {
+        success: true,
+        message: 'Conversation ready',
+        data: {
+          conversationId: String(conversation.id),
+          displayName: getDisplayName(conversation.contact_name || trimmedContactName, normalizedPhone),
+          contactPhone: normalizedPhone,
+          contactName: conversation.contact_name || trimmedContactName,
+        },
+      };
+    }
+
+    const setup = await findDefaultCloudApiSetupByUser(userId);
+    if (!setup?.phoneNumberId) {
+      return {
+        success: false,
+        message: 'WhatsApp phone number is not configured for this user',
+        data: null,
+      };
+    }
+
+    await executeConversationsDb(
+      `INSERT INTO conversations
+       (user_id, contact_phone, contact_name, whatsapp_phone_number_id, status, unread_count, total_messages, is_archived, is_pinned, is_muted, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'active', 0, 0, false, false, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [userId, normalizedPhone, trimmedContactName, setup.phoneNumberId]
+    );
+
+    [conversation] = await queryConversationsDb<any>(
+      `SELECT id, contact_phone, contact_name
+       FROM conversations
+       WHERE user_id = ? AND contact_phone = ?
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [userId, normalizedPhone]
+    );
+
+    if (!conversation) {
+      return {
+        success: false,
+        message: 'Conversation could not be created',
+        data: null,
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Conversation created successfully',
+      data: {
+        conversationId: String(conversation.id),
+        displayName: getDisplayName(conversation.contact_name || trimmedContactName, normalizedPhone),
+        contactPhone: normalizedPhone,
+        contactName: conversation.contact_name || trimmedContactName,
+      },
+    };
+  } catch (error) {
+    log.error('startConversation error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to start conversation',
+      data: null,
+    };
+  }
+}
+
 // ========================================
 // GET CONVERSATION BY ID
 // ========================================
@@ -456,6 +736,24 @@ export async function sendMessage({
       persistedMediaUrl = buildConversationMediaProxyUrl(messageData.mediaUploadToken);
       resolvedMediaMimeType = pendingUpload.mimeType || null;
       resolvedMediaFilename = pendingUpload.originalFilename || null;
+    } else if (messageData.forwardSourceMessageId) {
+      const forwardedMedia = await resolveForwardableConversationMedia({
+        userId,
+        messageId: messageData.forwardSourceMessageId,
+      });
+
+      if (!forwardedMedia.success || !forwardedMedia.signedUrl) {
+        return {
+          success: false,
+          message: forwardedMedia.message,
+          data: null,
+        };
+      }
+
+      mediaUrlForMeta = forwardedMedia.signedUrl;
+      persistedMediaUrl = forwardedMedia.proxyUrl || null;
+      resolvedMediaMimeType = forwardedMedia.mimeType || null;
+      resolvedMediaFilename = forwardedMedia.originalFilename || null;
     }
     
     // Build message payload
@@ -492,6 +790,9 @@ export async function sendMessage({
         break;
       case 'audio':
         messagePayload.audio = { link: mediaUrlForMeta };
+        break;
+      case 'sticker':
+        messagePayload.sticker = { link: mediaUrlForMeta };
         break;
       case 'template':
         messagePayload.template = {
@@ -1019,6 +1320,8 @@ export async function updateMessageStatus(
 // Export controller
 export const conversationController = {
   getConversations,
+  getConversationTargets,
+  startConversation,
   getConversationById,
   sendMessage,
   markAsRead: markConversationAsRead,

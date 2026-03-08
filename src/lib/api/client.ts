@@ -7,8 +7,11 @@
 import type { 
   ConversationListResponse, 
   ConversationDetailResponse,
+  ConversationTargetListResponse,
   SendMessageRequest,
-  SendMessageResponse
+  SendMessageResponse,
+  StartConversationRequest,
+  StartConversationResponse,
 } from '@/lib/types/chat';
 import { getCurrentUserId } from '@/lib/config/current-user';
 
@@ -90,6 +93,34 @@ export async function sendMessage(
     body: JSON.stringify(messageData),
   });
   
+  return response.json();
+}
+
+export async function fetchConversationTargets(params: {
+  search?: string;
+  limit?: number;
+} = {}): Promise<ConversationTargetListResponse> {
+  const searchParams = new URLSearchParams();
+
+  if (params.search) searchParams.set('search', params.search);
+  if (params.limit) searchParams.set('limit', String(params.limit));
+
+  const response = await fetch(`${API_BASE}/conversations/contacts?${searchParams.toString()}`, {
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+export async function startConversation(
+  payload: StartConversationRequest
+): Promise<StartConversationResponse> {
+  const response = await fetch(`${API_BASE}/conversations/start`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+
   return response.json();
 }
 
@@ -175,6 +206,8 @@ export const api = {
     list: fetchConversations,
     get: fetchConversation,
     sendMessage,
+    fetchConversationTargets,
+    startConversation,
     markAsRead,
     toggleArchive,
     togglePin,

@@ -36,9 +36,14 @@ export async function POST(
       );
     }
     
-    if (['image', 'video', 'document', 'audio'].includes(body.messageType) && !body.mediaUrl && !body.mediaUploadToken) {
+    if (
+      ['image', 'video', 'document', 'audio', 'sticker'].includes(body.messageType) &&
+      !body.mediaUrl &&
+      !body.mediaUploadToken &&
+      !body.forwardSourceMessageId
+    ) {
       return NextResponse.json(
-        { success: false, message: 'Media messages require mediaUrl or mediaUploadToken' },
+        { success: false, message: 'Media messages require mediaUrl, mediaUploadToken, or forwardSourceMessageId' },
         { status: 400 }
       );
     }
