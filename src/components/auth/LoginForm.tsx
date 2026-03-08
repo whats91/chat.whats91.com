@@ -1,8 +1,9 @@
 'use client';
 
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, LockKeyhole, MessageSquareText, ShieldCheck } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -215,66 +216,12 @@ export function LoginForm() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(69,188,150,0.18),_transparent_30%),linear-gradient(160deg,_hsl(var(--background))_0%,_hsl(var(--muted))_100%)]">
-      <div className="mx-auto grid min-h-screen max-w-6xl gap-8 px-4 py-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:py-10">
-        <section className="relative overflow-hidden rounded-[2rem] border bg-card/80 p-6 shadow-sm backdrop-blur sm:p-10">
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(69,188,150,0.12),transparent_55%)]" />
-          <div className="relative flex h-full flex-col justify-between gap-10">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full border bg-background/70 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-                Secure chat access
-              </div>
-              <div className="space-y-3">
-                <h1 className="max-w-xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-                  Sign in to Whats91 Chat
-                </h1>
-                <p className="max-w-lg text-base leading-7 text-muted-foreground sm:text-lg">
-                  Use your existing account from the main platform. Sessions stay active for 90 days,
-                  and all chat data stays isolated to the authenticated user.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[
-                {
-                  icon: LockKeyhole,
-                  title: 'Password login',
-                  copy: 'Supports existing bcrypt-hashed credentials from the users table.',
-                },
-                {
-                  icon: MessageSquareText,
-                  title: 'OTP login',
-                  copy: 'Sends a WhatsApp OTP to the number already linked to the account.',
-                },
-                {
-                  icon: ShieldCheck,
-                  title: 'Session security',
-                  copy: 'Signed cookies, CSRF checks, and user-scoped API access on every request.',
-                },
-              ].map((item) => (
-                <Card key={item.title} className="border-border/70 bg-background/70 shadow-none">
-                  <CardContent className="space-y-3 p-4">
-                    <item.icon className="h-5 w-5 text-primary" />
-                    <div className="space-y-1.5">
-                      <h2 className="text-sm font-semibold text-foreground">{item.title}</h2>
-                      <p className="text-sm leading-6 text-muted-foreground">{item.copy}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="flex items-center">
+      <div className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-6 sm:px-6 lg:max-w-lg lg:px-8 lg:py-10">
+        <section className="w-full">
           <Card className="w-full rounded-[2rem] border bg-background/95 shadow-xl shadow-black/5">
             <CardContent className="p-5 sm:p-8">
-              <div className="mb-6 space-y-1">
-                <h2 className="text-2xl font-semibold text-foreground">Welcome back</h2>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Choose the login method that matches your account setup.
-                </p>
+              <div className="mb-6">
+                <h1 className="text-2xl font-semibold text-foreground">Welcome back</h1>
               </div>
 
               <Tabs
@@ -285,8 +232,8 @@ export function LoginForm() {
                 className="space-y-6"
               >
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="password">Username & Password</TabsTrigger>
-                  <TabsTrigger value="otp">Login with OTP</TabsTrigger>
+                  <TabsTrigger value="password">Password</TabsTrigger>
+                  <TabsTrigger value="otp">OTP</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="password">
@@ -359,7 +306,7 @@ export function LoginForm() {
                     >
                       <form className="space-y-4" onSubmit={handleOtpVerify}>
                         <div className="space-y-1">
-                          <h3 className="text-sm font-semibold text-foreground">Enter the 6-digit OTP</h3>
+                          <h3 className="text-sm font-semibold text-foreground">Enter the 6-digit code</h3>
                           <p className="text-sm text-muted-foreground">
                             {maskedPhone
                               ? `Code sent to ${maskedPhone}. It stays valid for 10 minutes.`
@@ -405,6 +352,15 @@ export function LoginForm() {
                   </div>
                 </TabsContent>
               </Tabs>
+
+              <div className="mt-6 text-center">
+                <Link
+                  href="https://whats91.com"
+                  className="text-sm font-medium text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline"
+                >
+                  Back to Whats91
+                </Link>
+              </div>
             </CardContent>
           </Card>
         </section>

@@ -1,7 +1,10 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
+import { fetchCsrfToken, logout as logoutSession } from '@/lib/api/auth-client';
+import { clearCurrentUserId } from '@/lib/config/current-user';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -28,6 +31,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import type { Conversation } from '@/lib/types/chat';
+import { toast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
 interface ChatListProps {
@@ -35,6 +39,7 @@ interface ChatListProps {
 }
 
 export function ChatList({ className }: ChatListProps) {
+  const router = useRouter();
   const {
     conversations,
     selectedConversationId,
@@ -60,6 +65,45 @@ export function ChatList({ className }: ChatListProps) {
     conversationId: string;
     conversationName: string;
   } | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+
+    try {
+      const csrfToken = await fetchCsrfToken();
+      const response = await logoutSession(csrfToken);
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to log out');
+      }
+
+      clearCurrentUserId();
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('whats91-chat-store');
+      }
+
+      selectConversation(null);
+      toast({
+        title: 'Logged out',
+        description: 'Your session has been ended successfully.',
+      });
+      router.replace('/login');
+      router.refresh();
+    } catch (error) {
+      toast({
+        title: 'Logout failed',
+        description: error instanceof Error ? error.message : 'Unable to log out',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
 
   useEffect(() => {
     void loadConversations({
@@ -147,10 +191,14 @@ export function ChatList({ className }: ChatListProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem>Starred messages</DropdownMenuItem>
                 <DropdownMenuItem>Settings</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Log out</DropdownMenuItem>
+                <DropdownMenuItem onSelect={(event) => {
+                  event.preventDefault();
+                  void handleLogout();
+                }}>
+                  {isLoggingOut ? 'Logging out...' : 'Log out'}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
