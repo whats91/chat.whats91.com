@@ -794,6 +794,7 @@ function MessageList({
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLDivElement | null>());
+  const lastMessageId = messages[messages.length - 1]?.id || null;
   
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -801,13 +802,41 @@ function MessageList({
       return;
     }
 
-    if (scrollRef.current) {
-      const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    debugPubSub('MessageList received updated messages', {
+      totalMessages: messages.length,
+      lastMessageId,
+      lastMessage: lastMessageId ? messages[messages.length - 1] || null : null,
+    });
+
+    const frame = window.requestAnimationFrame(() => {
+      const lastMessageNode = lastMessageId
+        ? messageRefs.current.get(lastMessageId)
+        : null;
+
+      if (lastMessageNode) {
+        lastMessageNode.scrollIntoView({ block: 'end', behavior: 'smooth' });
+        debugPubSub('MessageList scrolled to newest message node', {
+          lastMessageId,
+        });
+        return;
       }
-    }
-  }, [activeMatchId, messages]);
+
+      if (scrollRef.current) {
+        const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+        if (scrollContainer) {
+          scrollContainer.scrollTop = scrollContainer.scrollHeight;
+          debugPubSub('MessageList scrolled viewport to bottom fallback', {
+            totalMessages: messages.length,
+            lastMessageId,
+          });
+        }
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeMatchId, lastMessageId, messages]);
 
   useEffect(() => {
     if (!activeMatchId) {
