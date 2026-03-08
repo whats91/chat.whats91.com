@@ -495,7 +495,7 @@ export async function startConversation({
     }
 
     const setup = await findDefaultCloudApiSetupByUser(userId);
-    if (!setup?.phoneNumberId) {
+    if (!setup?.phoneNumberId || !setup.whatsappAccessToken) {
       return {
         success: false,
         message: 'WhatsApp phone number is not configured for this user',
@@ -704,12 +704,33 @@ export async function sendMessage({
     }
     
     // Get CloudApiSetup for this user
-    const cloudSetup = await findCloudApiSetupByUserAndPhoneNumberId(
-      userId,
-      String(conversation.whatsapp_phone_number_id)
-    );
+    let resolvedPhoneNumberId = conversation.whatsapp_phone_number_id
+      ? String(conversation.whatsapp_phone_number_id)
+      : null;
+    let cloudSetup = resolvedPhoneNumberId
+      ? await findCloudApiSetupByUserAndPhoneNumberId(userId, resolvedPhoneNumberId)
+      : null;
 
-    if (!cloudSetup || !cloudSetup.whatsappAccessToken) {
+    if (!cloudSetup?.whatsappAccessToken) {
+      const fallbackSetup = await findDefaultCloudApiSetupByUser(userId);
+
+      if (fallbackSetup?.phoneNumberId && fallbackSetup.whatsappAccessToken) {
+        cloudSetup = fallbackSetup;
+        resolvedPhoneNumberId = fallbackSetup.phoneNumberId;
+
+        if (String(conversation.whatsapp_phone_number_id || '') !== fallbackSetup.phoneNumberId) {
+          await executeConversationsDb(
+            `UPDATE conversations
+             SET whatsapp_phone_number_id = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND user_id = ?`,
+            [fallbackSetup.phoneNumberId, conversationId, userId]
+          );
+          conversation.whatsapp_phone_number_id = fallbackSetup.phoneNumberId;
+        }
+      }
+    }
+
+    if (!cloudSetup || !cloudSetup.whatsappAccessToken || !resolvedPhoneNumberId) {
       return {
         success: false,
         message: 'WhatsApp configuration not found for this phone number',
@@ -813,7 +834,7 @@ export async function sendMessage({
     const sendResult = await sendMessageToMeta({
       messagePayload,
       accessToken: cloudSetup.whatsappAccessToken,
-      phoneNumberId: conversation.whatsapp_phone_number_id,
+      phoneNumberId: resolvedPhoneNumberId,
       options: {
         userId,
         receiverId: conversation.contact_phone,

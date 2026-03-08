@@ -85,14 +85,14 @@ export function MediaLightbox({
     <Dialog open={open && Boolean(message)} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="left-0 top-0 h-screen w-screen max-w-none translate-x-0 translate-y-0 border-0 bg-black/95 p-0 text-white shadow-none"
+        className="left-0 top-0 !flex h-screen w-screen !max-w-none !translate-x-0 !translate-y-0 border-0 bg-black/95 p-0 text-white shadow-none"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Media viewer</DialogTitle>
         </DialogHeader>
 
-        <div className="flex h-full flex-col">
-          <div className="flex items-start justify-between gap-4 p-4">
+        <div className="relative flex h-full w-full flex-col overflow-hidden">
+          <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 p-4">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">
                 {resolved?.mediaFilename || (resolved ? resolved.type[0].toUpperCase() + resolved.type.slice(1) : 'Media')}
@@ -147,25 +147,27 @@ export function MediaLightbox({
             </div>
           </div>
 
-          <div className="flex flex-1 items-center justify-center p-6 pt-2">
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-24">
             {canRender && resolved ? (
-              resolved.type === 'video' ? (
-                <video
-                  src={resolved.mediaUrl!}
-                  controls
-                  autoPlay
-                  className="max-h-[82vh] max-w-[92vw] rounded-lg bg-black"
-                />
-              ) : (
-                <img
-                  src={resolved.mediaUrl!}
-                  alt={caption || resolved.type}
-                  className={cn(
-                    'max-h-[82vh] max-w-[92vw] rounded-lg bg-black/20 object-contain',
-                    resolved.type === 'sticker' && 'p-4'
-                  )}
-                />
-              )
+              <div className="mx-auto flex w-full items-center justify-center">
+                {resolved.type === 'video' ? (
+                  <video
+                    src={resolved.mediaUrl!}
+                    controls
+                    autoPlay
+                    className="mx-auto max-h-[82vh] max-w-[92vw] rounded-lg bg-black"
+                  />
+                ) : (
+                  <img
+                    src={resolved.mediaUrl!}
+                    alt={caption || resolved.type}
+                    className={cn(
+                      'mx-auto max-h-[82vh] max-w-[92vw] rounded-lg bg-black/20 object-contain',
+                      resolved.type === 'sticker' && 'p-4'
+                    )}
+                  />
+                )}
+              </div>
             ) : (
               <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/75">
                 This media cannot be previewed here.

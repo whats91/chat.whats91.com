@@ -101,6 +101,7 @@ export async function findCloudApiSetupByUserAndPhoneNumberId(
     `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
      FROM cloud_api_setup
      WHERE user_id = ? AND phone_number_id = ?
+     ORDER BY (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') DESC, access_chats DESC, id DESC
      LIMIT 1`,
     userId,
     phoneNumberId
@@ -116,6 +117,7 @@ export async function findCloudApiSetupByPhoneNumberId(
     `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
      FROM cloud_api_setup
      WHERE phone_number_id = ?
+     ORDER BY (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') DESC, access_chats DESC, id DESC
      LIMIT 1`,
     phoneNumberId
   );
@@ -130,7 +132,7 @@ export async function findDefaultCloudApiSetupByUser(
     `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
      FROM cloud_api_setup
      WHERE user_id = ? AND phone_number_id IS NOT NULL
-     ORDER BY access_chats DESC, updated_at DESC, id DESC
+     ORDER BY (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') DESC, access_chats DESC, updated_at DESC, id DESC
      LIMIT 1`,
     userId
   );
