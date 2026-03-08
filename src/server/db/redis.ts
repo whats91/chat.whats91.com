@@ -296,6 +296,10 @@ class InMemoryRedis implements RedisClient {
   async publish(channel: string, message: string): Promise<void> {
     const fullChannel = this.getFullKey(channel);
     const callbacks = this.subscribers.get(fullChannel);
+    log.debug('In-memory publish', {
+      channel: fullChannel,
+      subscriberCount: callbacks?.size || 0,
+    });
     if (callbacks) {
       callbacks.forEach(cb => cb(message));
     }
@@ -307,6 +311,10 @@ class InMemoryRedis implements RedisClient {
       this.subscribers.set(fullChannel, new Set());
     }
     this.subscribers.get(fullChannel)!.add(callback);
+    log.debug('In-memory subscribe', {
+      channel: fullChannel,
+      subscriberCount: this.subscribers.get(fullChannel)!.size,
+    });
   }
 
   async unsubscribe(channel: string, callback?: (message: string) => void): Promise<void> {
@@ -324,7 +332,16 @@ class InMemoryRedis implements RedisClient {
     callbacks.delete(callback);
     if (callbacks.size === 0) {
       this.subscribers.delete(fullChannel);
+      log.debug('In-memory unsubscribe removed final subscriber', {
+        channel: fullChannel,
+      });
+      return;
     }
+
+    log.debug('In-memory unsubscribe', {
+      channel: fullChannel,
+      subscriberCount: callbacks.size,
+    });
   }
   
   async disconnect(): Promise<void> {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import PubSubClient from '@/lib/pubsub/client';
+import { debugPubSub } from '@/lib/pubsub/debug';
 import type { PubSubClientPayload } from '@/lib/types/pubsub';
 
 interface UsePubSubOptions {
@@ -31,16 +32,32 @@ export function usePubSub({
 
   useEffect(() => {
     if (!autoConnect || !userId) {
+      debugPubSub('usePubSub skipped auto-connect', {
+        autoConnect,
+        hasUserId: Boolean(userId),
+      });
       return;
     }
 
     const client = new PubSubClient();
     clientRef.current = client;
+    debugPubSub('usePubSub starting client', {
+      userId,
+      channel: `conversations-${userId}`,
+    });
 
     const handleMessage = (payload: PubSubClientPayload) => {
+      debugPubSub('usePubSub received payload from client', {
+        userId,
+        payloadType: payload.type,
+      });
       messageHandlerRef.current?.(payload);
     };
     const handleConnectionChange = (connected: boolean) => {
+      debugPubSub('usePubSub connection changed', {
+        userId,
+        connected,
+      });
       connectionHandlerRef.current?.(connected);
     };
 
@@ -50,6 +67,9 @@ export function usePubSub({
     client.subscribe(`conversations-${userId}`);
 
     return () => {
+      debugPubSub('usePubSub cleaning up client', {
+        userId,
+      });
       client.offMessage(handleMessage);
       client.offConnectionChange(handleConnectionChange);
       client.disconnect();

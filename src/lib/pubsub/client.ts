@@ -4,6 +4,7 @@ import type {
   PubSubClientPayload,
   PubSubTransportEnvelope,
 } from '@/lib/types/pubsub';
+import { debugPubSub } from '@/lib/pubsub/debug';
 
 type MessageHandler = (payload: PubSubClientPayload, envelope: Extract<PubSubTransportEnvelope, { type: 'message' }>) => void;
 type ConnectionHandler = (connected: boolean) => void;
@@ -115,27 +116,45 @@ class PubSubClient {
 
     const streamUrl = this.buildStreamUrl();
     if (!streamUrl) {
+      debugPubSub('Skipped connect because no stream URL could be built', {
+        channel: this.subscribedChannel,
+      });
       return;
     }
 
     if (this.eventSource && (this.eventSource.readyState === EventSource.OPEN || this.eventSource.readyState === EventSource.CONNECTING)) {
+      debugPubSub('Skipped connect because EventSource is already active', {
+        channel: this.subscribedChannel,
+        readyState: this.eventSource.readyState,
+      });
       return;
     }
 
     this.shouldReconnect = true;
     this.closeSource();
+    debugPubSub('Opening EventSource connection', {
+      channel: this.subscribedChannel,
+      streamUrl,
+    });
 
     const eventSource = new EventSource(streamUrl, { withCredentials: true });
     this.eventSource = eventSource;
 
     eventSource.onopen = () => {
       this.isConnected = true;
+      debugPubSub('EventSource opened', {
+        channel: this.subscribedChannel,
+      });
       this.emitConnection(true);
     };
 
     eventSource.onmessage = (event) => {
       try {
         const envelope = JSON.parse(event.data) as PubSubTransportEnvelope;
+        debugPubSub('EventSource message received', {
+          channel: this.subscribedChannel,
+          envelopeType: envelope.type,
+        });
         this.handleEnvelope(envelope);
       } catch (error) {
         console.error('[PubSub] Failed to parse envelope:', error);
@@ -144,6 +163,10 @@ class PubSubClient {
 
     eventSource.onerror = () => {
       this.isConnected = false;
+      debugPubSub('EventSource error fired', {
+        channel: this.subscribedChannel,
+        readyState: eventSource.readyState,
+      });
       this.emitConnection(false);
 
       if (!this.shouldReconnect) {
@@ -154,10 +177,14 @@ class PubSubClient {
 
   subscribe(channel: string): void {
     this.subscribedChannel = channel;
+    debugPubSub('Subscribing to channel', { channel });
     this.connect();
   }
 
   unsubscribe(): void {
+    debugPubSub('Unsubscribing from channel', {
+      channel: this.subscribedChannel,
+    });
     this.subscribedChannel = null;
     this.clientId = null;
     this.subscriberId = null;
@@ -184,6 +211,9 @@ class PubSubClient {
 
   disconnect(): void {
     this.shouldReconnect = false;
+    debugPubSub('Disconnect requested', {
+      channel: this.subscribedChannel,
+    });
     this.unsubscribe();
   }
 

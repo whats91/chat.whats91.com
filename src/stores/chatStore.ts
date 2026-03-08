@@ -23,6 +23,7 @@ import {
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { mockLabels } from '@/lib/mock/data';
+import { debugPubSub } from '@/lib/pubsub/debug';
 
 interface ChatLabel {
   id: string;
@@ -793,6 +794,12 @@ export const useChatStore = create<ChatState>()(
       handleNewMessage: (data) => {
         const { conversationId, message } = data;
         const conversationKey = String(conversationId);
+        debugPubSub('Store handling new message', {
+          conversationId: conversationKey,
+          messageId: message.id,
+          whatsappMessageId: message.whatsappMessageId,
+          direction: message.direction,
+        });
         
         set((state) => {
           const normalizedMessage: Message = {
@@ -875,6 +882,13 @@ export const useChatStore = create<ChatState>()(
               )
             : [nextConversation, ...state.conversations];
 
+          debugPubSub('Store updated after new message', {
+            conversationId: conversationKey,
+            totalMessagesInConversation: newMap.get(conversationKey)?.length || 0,
+            selectedConversationId: state.selectedConversationId,
+            conversationExists: Boolean(existingConversation),
+          });
+
           return {
             messagesByConversation: newMap,
             conversations: sortConversations(conversations),
@@ -886,6 +900,11 @@ export const useChatStore = create<ChatState>()(
       handleStatusUpdate: (data) => {
         const { messageId, status, conversationId } = data;
         const conversationKey = String(conversationId);
+        debugPubSub('Store handling status update', {
+          conversationId: conversationKey,
+          messageId,
+          status,
+        });
         
         set((state) => {
           const newMap = new Map(state.messagesByConversation);
@@ -896,6 +915,10 @@ export const useChatStore = create<ChatState>()(
               : m
           );
           newMap.set(conversationKey, updatedMessages);
+          debugPubSub('Store updated after status update', {
+            conversationId: conversationKey,
+            messageCount: updatedMessages.length,
+          });
           return { messagesByConversation: newMap };
         });
       },

@@ -49,7 +49,11 @@ export async function publishToUser(
     const redis = await getRedisClient();
     await redis.publish(channel, message);
 
-    log.info('Published event', { type: event.type, channel });
+    log.info('Published event', {
+      type: event.type,
+      channel,
+      userId: String(userId),
+    });
   } catch (error) {
     log.error('Publish error', { error });
   }
@@ -64,10 +68,18 @@ export async function subscribeToUser(
 ): Promise<() => void> {
   const channel = getChannelName(userId);
   const redis = await getRedisClient();
+  log.info('Preparing subscription', {
+    channel,
+    userId: String(userId),
+  });
   const redisHandler = (message: string) => {
     try {
       const event = JSON.parse(message) as PubSubEvent;
-      log.debug('Received pubsub message', { type: event.type, channel });
+      log.debug('Received pubsub message', {
+        type: event.type,
+        channel,
+        userId: String(userId),
+      });
       callback(event);
     } catch (error) {
       log.error('Parse error', { error, channel });
@@ -113,6 +125,13 @@ export async function publishNewMessage(
     outgoingPayload?: Record<string, unknown> | null;
   }
 ): Promise<void> {
+  log.debug('Queueing new_message event', {
+    userId: String(userId),
+    conversationId: conversation.id,
+    messageId: messageRecord.id,
+    whatsappMessageId: messageRecord.whatsappMessageId,
+    direction: messageRecord.direction,
+  });
   const event: NewMessageEvent = {
     type: 'new_message',
     timestamp: new Date().toISOString(),
@@ -143,6 +162,12 @@ export async function publishStatusUpdate(
     errorMessage?: string;
   }
 ): Promise<void> {
+  log.debug('Queueing status_update event', {
+    userId: String(userId),
+    conversationId: data.conversationId,
+    messageId: data.messageId,
+    status: data.status,
+  });
   const event: StatusUpdateEvent = {
     type: 'status_update',
     timestamp: new Date().toISOString(),

@@ -15,6 +15,7 @@ import { NewChatModal } from '@/components/chat/NewChatModal';
 import { VersionFooter } from '@/components/common/VersionFooter';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { usePubSub } from '@/hooks/use-pubsub';
+import { debugPubSub } from '@/lib/pubsub/debug';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -78,8 +79,17 @@ export function AppShell() {
 
   const handlePubSubPayload = useCallback(
     (payload: PubSubClientPayload) => {
+      debugPubSub('AppShell received payload', {
+        payloadType: payload.type,
+      });
+
       if (payload.type === 'new_message') {
         const event = payload as PubSubNewMessageEvent;
+        debugPubSub('AppShell forwarding new_message to store', {
+          conversationId: event.data.conversation.id,
+          messageId: event.data.messageRecord.id,
+          whatsappMessageId: event.data.messageRecord.whatsappMessageId,
+        });
         handleNewMessage({
           conversationId: event.data.conversation.id,
           message: mapPubSubMessageToChatMessage(event),
@@ -89,6 +99,11 @@ export function AppShell() {
 
       if (payload.type === 'status_update') {
         const event = payload as PubSubStatusUpdateEvent;
+        debugPubSub('AppShell forwarding status_update to store', {
+          conversationId: event.data.conversationId,
+          messageId: event.data.messageId,
+          status: event.data.status,
+        });
         handleStatusUpdate({
           messageId: event.data.messageId,
           status: event.data.status,
