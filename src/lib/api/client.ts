@@ -16,19 +16,13 @@ import type {
   StartConversationRequest,
   StartConversationResponse,
 } from '@/lib/types/chat';
-import { getCurrentUserId } from '@/lib/config/current-user';
 
 const API_BASE = '/api';
 
-function getUserId(): string {
-  return getCurrentUserId();
-}
-
-// Default headers including user ID
+// Default JSON headers for same-origin authenticated API calls.
 function getHeaders(): HeadersInit {
   return {
     'Content-Type': 'application/json',
-    'x-user-id': getUserId(),
   };
 }
 
@@ -320,9 +314,6 @@ export async function sendVoiceNote(
 
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/voice-note`, {
     method: 'POST',
-    headers: {
-      'x-user-id': getUserId(),
-    },
     body: formData,
   });
 

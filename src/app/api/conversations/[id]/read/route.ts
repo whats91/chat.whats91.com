@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 /**
  * Mark Conversation as Read API Route Handler
@@ -14,8 +14,11 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     
     const result = await conversationController.markAsRead(parseInt(id), userId);
     

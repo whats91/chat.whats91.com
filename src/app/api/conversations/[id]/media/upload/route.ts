@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { uploadConversationMedia } from '@/server/media/conversation-media-service';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 export const runtime = 'nodejs';
 
@@ -9,7 +9,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     const { id } = await params;
     const formData = await request.formData();
     const fileEntry = formData.get('files') || formData.get('file');

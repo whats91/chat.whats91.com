@@ -89,6 +89,9 @@ function validateEnvironment() {
     'DATABASE_URL',
     'NEXT_PUBLIC_APP_URL',
   ];
+  const recommendedAnyOf = [
+    ['AUTH_SESSION_SECRET', 'NEXTAUTH_SECRET'],
+  ];
   
   // Check required variables
   const missingRequired = requiredVars.filter(v => !process.env[v]);
@@ -101,6 +104,13 @@ function validateEnvironment() {
   const missingRecommended = recommendedVars.filter(v => !process.env[v]);
   if (missingRecommended.length > 0) {
     console.warn(`[Startup] Warning: Missing recommended environment variables: ${missingRecommended.join(', ')}`);
+  }
+
+  const missingRecommendedGroups = recommendedAnyOf
+    .filter((group) => !group.some((key) => process.env[key]))
+    .map((group) => group.join(' or '));
+  if (missingRecommendedGroups.length > 0) {
+    console.warn(`[Startup] Warning: Missing recommended auth secrets: ${missingRecommendedGroups.join(', ')}`);
   }
   
   console.log('[Startup] Environment validation passed');

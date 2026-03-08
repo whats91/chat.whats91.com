@@ -1,7 +1,12 @@
-'use client';
-
+import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
+import { getAuthenticatedUser } from '@/server/auth/session';
 
-export default function ChatsPage() {
+export default async function ChatsPage() {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    redirect('/login');
+  }
+
   return <AppShell />;
 }

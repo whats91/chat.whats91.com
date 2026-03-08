@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'node:stream';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { streamConversationMedia } from '@/server/media/conversation-media-service';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 export const runtime = 'nodejs';
 
@@ -28,7 +28,11 @@ export async function GET(
   { params }: { params: Promise<{ messageId: string }> }
 ) {
   try {
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     const { messageId } = await params;
     const asDownload = request.nextUrl.searchParams.get('download') === '1';
 

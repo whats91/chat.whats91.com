@@ -9,9 +9,31 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { AUTH_SESSION_COOKIE_NAME } from '@/lib/auth/session';
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const hasSessionCookie = request.cookies.has(AUTH_SESSION_COOKIE_NAME);
+  const isApiRoute = pathname.startsWith('/api/');
+  const isPublicAsset =
+    pathname.startsWith('/images/') ||
+    pathname.startsWith('/icons/') ||
+    pathname.startsWith('/screenshots/') ||
+    /\.[^/]+$/.test(pathname);
+  const isProtectedPage =
+    !isApiRoute &&
+    !isPublicAsset &&
+    pathname !== '/login' &&
+    !pathname.startsWith('/_next') &&
+    pathname !== '/favicon.ico';
+
+  if (isProtectedPage && !hasSessionCookie) {
+    const loginUrl = new URL('/login', request.url);
+    if (pathname !== '/') {
+      loginUrl.searchParams.set('next', pathname);
+    }
+    return NextResponse.redirect(loginUrl);
+  }
   
   // Add security headers
   const response = NextResponse.next();

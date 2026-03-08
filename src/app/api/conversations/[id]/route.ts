@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 /**
  * Individual Conversation API Route Handler
@@ -17,8 +17,11 @@ export async function GET(
   try {
     const { id } = await params;
     const searchParams = request.nextUrl.searchParams;
-    
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     
     const result = await conversationController.getConversationById({
       conversationId: parseInt(id),
@@ -46,8 +49,11 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     
     const result = await conversationController.delete(parseInt(id), userId);
     

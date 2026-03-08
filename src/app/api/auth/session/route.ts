@@ -1,45 +1,59 @@
-import { NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  clearAuthSession,
+  getAuthenticatedUser,
+  setCsrfCookie,
+  validateCsrfRequest,
+} from '@/server/auth/session';
 
-/**
- * Auth Session Route Handler
- * 
- * Placeholder for session management
- * In production, this would integrate with NextAuth.js or similar
- */
-
-// GET - Get current session
 export async function GET() {
-  // TODO: Implement actual session check
-  // For now, return mock session for development
-  
-  return NextResponse.json({
-    authenticated: true,
-    user: {
-      id: getCurrentUserId(),
-      name: 'Demo User',
-      email: 'demo@whats91.com',
-      tenantId: 'tenant-1',
+  const user = await getAuthenticatedUser();
+  const response = NextResponse.json(
+    {
+      authenticated: Boolean(user),
+      user,
     },
-    tenant: {
-      id: 'tenant-1',
-      name: 'Acme Corp',
-      subdomain: 'acme',
-    },
-  });
+    { status: 200 }
+  );
+
+  setCsrfCookie(response);
+  response.headers.set('Cache-Control', 'no-store');
+
+  return response;
 }
 
-// POST - Create session (login)
 export async function POST() {
-  // TODO: Implement login
   return NextResponse.json(
-    { error: 'Not implemented' },
-    { status: 501 }
+    {
+      success: false,
+      message: 'Use the dedicated password or OTP login endpoints',
+    },
+    { status: 405 }
   );
 }
 
-// DELETE - Destroy session (logout)
-export async function DELETE() {
-  // TODO: Implement logout
-  return NextResponse.json({ success: true });
+export async function DELETE(request: NextRequest) {
+  const csrfValidation = validateCsrfRequest(request);
+  if (!csrfValidation.valid) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: csrfValidation.message,
+      },
+      { status: 403 }
+    );
+  }
+
+  const response = NextResponse.json(
+    {
+      success: true,
+      message: 'Logged out successfully',
+    },
+    { status: 200 }
+  );
+
+  clearAuthSession(response);
+  response.headers.set('Cache-Control', 'no-store');
+
+  return response;
 }

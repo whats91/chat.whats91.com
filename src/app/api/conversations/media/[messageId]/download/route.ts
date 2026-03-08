@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { downloadAndCacheConversationMedia } from '@/server/media/conversation-media-service';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 export const runtime = 'nodejs';
 
@@ -9,7 +9,11 @@ export async function POST(
   { params }: { params: Promise<{ messageId: string }> }
 ) {
   try {
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     const { messageId } = await params;
 
     const result = await downloadAndCacheConversationMedia({

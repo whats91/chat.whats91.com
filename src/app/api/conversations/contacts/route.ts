@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
 
     const result = await conversationController.getConversationTargets({
       userId,

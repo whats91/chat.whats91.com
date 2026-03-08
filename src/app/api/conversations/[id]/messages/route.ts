@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
 import type { SendMessageRequest } from '@/lib/types/chat';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 /**
  * Conversation Messages API Route Handler
@@ -17,8 +17,11 @@ export async function POST(
   try {
     const { id } = await params;
     const body: SendMessageRequest = await request.json();
-    
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     
     // Validate required fields
     if (!body.messageType) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 export async function GET(
   request: NextRequest,
@@ -8,7 +8,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
     const limit = parseInt(request.nextUrl.searchParams.get('limit') || '250', 10);
 
     const result = await conversationController.getConversationMediaMessages(

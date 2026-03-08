@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/config/current-user';
 import { conversationController } from '@/server/controllers/conversation-controller';
 import type { StartConversationRequest } from '@/lib/types/chat';
+import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as StartConversationRequest;
-    const userId = getCurrentUserId();
+    const auth = await requireAuthenticatedRouteUser();
+    if ('response' in auth) {
+      return auth.response;
+    }
+    const userId = auth.user.id;
 
     if (!body.phone?.trim()) {
       return NextResponse.json(

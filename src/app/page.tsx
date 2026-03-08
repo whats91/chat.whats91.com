@@ -1,8 +1,12 @@
-'use client';
-
+import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
+import { getAuthenticatedUser } from '@/server/auth/session';
 
-// Main chat page - triggers rebuild
-export default function HomePage() {
+export default async function HomePage() {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    redirect('/login');
+  }
+
   return <AppShell />;
 }
