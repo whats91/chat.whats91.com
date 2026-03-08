@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,7 @@ import { sendMessage as sendConversationMessage, startConversation } from '@/lib
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
+import { formatDateHeaderInIst, formatTimeInIst, getIstDateKey } from '@/lib/time/ist';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +34,8 @@ import {
   Search,
   MoreVertical,
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Paperclip,
   Image as ImageIcon,
   Smile,
@@ -50,12 +53,58 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Message, Conversation, ConversationTarget, SendMessageRequest } from '@/lib/types/chat';
-import { format, isToday, isYesterday } from 'date-fns';
 
 interface ConversationViewProps {
   conversationId: string;
   onBack?: () => void;
   showBackButton?: boolean;
+}
+
+function getSearchableMessageText(message: Message): string {
+  const resolved = resolveMessageForRendering(message);
+  const contactText = (resolved.contactData || [])
+    .flatMap((contact) => {
+      const phoneValues = Array.isArray(contact.phones)
+        ? contact.phones.flatMap((phone) => [phone.phone, phone.wa_id].filter(Boolean))
+        : [];
+
+      return [
+        contact.name?.formattedName,
+        contact.name?.firstName,
+        contact.name?.lastName,
+        ...phoneValues,
+      ];
+    })
+    .filter(Boolean)
+    .join(' ');
+
+  return [
+    resolved.content,
+    resolved.mediaCaption,
+    resolved.mediaFilename,
+    resolved.mediaMimeType,
+    resolved.locationData?.name,
+    resolved.locationData?.address,
+    contactText,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function compareMessageTimeline(left: Message, right: Message): number {
+  const timestampDiff = new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
+  if (timestampDiff !== 0) {
+    return timestampDiff;
+  }
+
+  const leftId = Number(left.id);
+  const rightId = Number(right.id);
+  if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
+    return leftId - rightId;
+  }
+
+  return String(left.id).localeCompare(String(right.id));
 }
 
 export function ConversationView({
@@ -68,18 +117,74 @@ export function ConversationView({
     getMessages,
     sendMessage,
     loadConversations,
-    selectConversation,
+    loadMessages,
     toggleRightPanel,
     isRightPanelOpen,
   } = useChatStore();
   const [viewerMessage, setViewerMessage] = useState<Message | null>(null);
   const [isForwardPickerOpen, setIsForwardPickerOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   
   const conversation = conversations.find(c => c.id === conversationId);
-  const messages = getMessages(conversationId);
+  const messages = [...getMessages(conversationId)].sort(compareMessageTimeline);
   const currentUserId = getCurrentUserId();
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const searchMatches = useMemo(
+    () =>
+      normalizedSearchQuery
+        ? messages.filter((message) => getSearchableMessageText(message).includes(normalizedSearchQuery))
+        : [],
+    [messages, normalizedSearchQuery]
+  );
+  const matchedMessageIds = useMemo(() => new Set(searchMatches.map((message) => message.id)), [searchMatches]);
+  const activeMatchId =
+    activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
+      ? searchMatches[activeSearchMatchIndex]?.id || null
+      : null;
 
-  const handleForwardSelect = async (target: ConversationTarget) => {
+  useEffect(() => {
+    if (!isSearchOpen) {
+      setSearchQuery('');
+      setActiveSearchMatchIndex(-1);
+    }
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (!normalizedSearchQuery || searchMatches.length === 0) {
+      setActiveSearchMatchIndex(-1);
+      return;
+    }
+
+    setActiveSearchMatchIndex((currentIndex) => {
+      if (currentIndex >= 0 && currentIndex < searchMatches.length) {
+        return currentIndex;
+      }
+
+      return searchMatches.length - 1;
+    });
+  }, [normalizedSearchQuery, searchMatches.length]);
+
+  const navigateSearch = (direction: 'up' | 'down') => {
+    if (searchMatches.length === 0) {
+      return;
+    }
+
+    setActiveSearchMatchIndex((currentIndex) => {
+      if (currentIndex === -1) {
+        return direction === 'up' ? searchMatches.length - 1 : 0;
+      }
+
+      if (direction === 'up') {
+        return currentIndex === 0 ? searchMatches.length - 1 : currentIndex - 1;
+      }
+
+      return currentIndex === searchMatches.length - 1 ? 0 : currentIndex + 1;
+    });
+  };
+
+  const handleForwardConfirm = async (targets: ConversationTarget[]) => {
     if (!viewerMessage) {
       throw new Error('No media is selected for forwarding');
     }
@@ -89,31 +194,11 @@ export function ConversationView({
       throw new Error('This media type cannot be forwarded from the viewer');
     }
 
-    let targetConversationId = target.conversationId;
-    if (!targetConversationId) {
-      const startResponse = await startConversation({
-        phone: target.phone,
-        contactName: target.contactName,
-      });
-
-      if (!startResponse.success || !startResponse.data) {
-        toast({
-          title: 'Unable to open contact',
-          description: startResponse.message || 'The target conversation could not be created.',
-          variant: 'destructive',
-        });
-        throw new Error(startResponse.message || 'Unable to open contact');
-      }
-
-      targetConversationId = startResponse.data.conversationId;
-    }
-
     const caption =
       viewerMessage.mediaCaption?.trim() ||
       (viewerMessage.content && !/^\[[^\]]+\]$/.test(viewerMessage.content.trim())
         ? viewerMessage.content.trim()
         : undefined);
-
     const payload: SendMessageRequest = {
       messageType: resolved.type,
       messageContent: caption,
@@ -121,24 +206,64 @@ export function ConversationView({
       forwardSourceMessageId: viewerMessage.id,
     };
 
-    const sendResponse = await sendConversationMessage(targetConversationId, payload);
-    if (!sendResponse.success) {
-      toast({
-        title: 'Forward failed',
-        description: sendResponse.message || 'The media could not be forwarded.',
-        variant: 'destructive',
-      });
-      throw new Error(sendResponse.message || 'Forward failed');
+    const successfulConversationIds = new Set<string>();
+    const failedTargets: string[] = [];
+
+    for (const target of targets) {
+      let targetConversationId = target.conversationId;
+
+      if (!targetConversationId) {
+        const startResponse = await startConversation({
+          phone: target.phone,
+          contactName: target.contactName,
+        });
+
+        if (!startResponse.success || !startResponse.data) {
+          failedTargets.push(target.displayName);
+          continue;
+        }
+
+        targetConversationId = startResponse.data.conversationId;
+      }
+
+      const sendResponse = await sendConversationMessage(targetConversationId, payload);
+      if (!sendResponse.success) {
+        failedTargets.push(target.displayName);
+        continue;
+      }
+
+      successfulConversationIds.add(targetConversationId);
+    }
+
+    if (successfulConversationIds.size === 0) {
+      throw new Error(
+        failedTargets.length > 0
+          ? `Forward failed for ${failedTargets.join(', ')}`
+          : 'Forward failed'
+      );
     }
 
     await loadConversations();
-    await selectConversation(targetConversationId);
+
+    if (successfulConversationIds.has(conversationId)) {
+      await loadMessages(conversationId);
+    }
+
     setIsForwardPickerOpen(false);
     setViewerMessage(null);
 
+    if (failedTargets.length > 0) {
+      toast({
+        title: 'Forward completed with issues',
+        description: `Sent to ${successfulConversationIds.size} recipient${successfulConversationIds.size === 1 ? '' : 's'}. Failed: ${failedTargets.join(', ')}.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     toast({
       title: 'Media forwarded',
-      description: `Sent to ${target.displayName}.`,
+      description: `Sent to ${successfulConversationIds.size} recipient${successfulConversationIds.size === 1 ? '' : 's'}.`,
     });
   };
   
@@ -157,9 +282,23 @@ export function ConversationView({
         conversation={conversation}
         onBack={onBack}
         showBackButton={showBackButton}
+        onSearchClick={() => setIsSearchOpen((current) => !current)}
+        isSearchOpen={isSearchOpen}
         onInfoClick={() => toggleRightPanel()}
         isInfoOpen={isRightPanelOpen}
       />
+
+      {isSearchOpen ? (
+        <ConversationSearchBar
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          activeMatchIndex={activeSearchMatchIndex}
+          totalMatches={searchMatches.length}
+          onNavigateUp={() => navigateSearch('up')}
+          onNavigateDown={() => navigateSearch('down')}
+          onClose={() => setIsSearchOpen(false)}
+        />
+      ) : null}
       
       {/* Messages - wrapper div with overflow-hidden is critical for ScrollArea */}
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -167,6 +306,8 @@ export function ConversationView({
           messages={messages}
           currentUserId={currentUserId}
           onOpenMedia={(message) => setViewerMessage(message)}
+          activeMatchId={activeMatchId}
+          matchedMessageIds={matchedMessageIds}
         />
       </div>
       
@@ -195,8 +336,10 @@ export function ConversationView({
         open={isForwardPickerOpen}
         onOpenChange={setIsForwardPickerOpen}
         title="Forward Media"
-        description="Select a contact or recent conversation."
-        onSelect={handleForwardSelect}
+        description="Select one or more contacts, then confirm."
+        selectionMode="multiple"
+        confirmButtonText="Forward"
+        onConfirmSelection={handleForwardConfirm}
       />
     </div>
   );
@@ -206,6 +349,8 @@ interface ConversationHeaderProps {
   conversation: Conversation;
   onBack?: () => void;
   showBackButton: boolean;
+  onSearchClick: () => void;
+  isSearchOpen: boolean;
   onInfoClick: () => void;
   isInfoOpen: boolean;
 }
@@ -214,6 +359,8 @@ function ConversationHeader({
   conversation,
   onBack,
   showBackButton,
+  onSearchClick,
+  isSearchOpen,
   onInfoClick,
   isInfoOpen,
 }: ConversationHeaderProps) {
@@ -254,7 +401,7 @@ function ConversationHeader({
           ) : participantStatus === 'online' ? (
             'online'
           ) : participantLastSeen ? (
-            `last seen ${format(participantLastSeen, 'h:mm a')}`
+            `last seen ${formatTimeInIst(participantLastSeen)}`
           ) : (
             participantPhone
           )}
@@ -283,11 +430,11 @@ function ConversationHeader({
           
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onSearchClick}>
                 <Search className="h-5 w-5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Search</TooltipContent>
+            <TooltipContent>{isSearchOpen ? 'Close search' : 'Search'}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
         
@@ -300,7 +447,9 @@ function ConversationHeader({
           <DropdownMenuContent align="end">
             <DropdownMenuItem>View contact</DropdownMenuItem>
             <DropdownMenuItem>Media, links, and docs</DropdownMenuItem>
-            <DropdownMenuItem>Search</DropdownMenuItem>
+            <DropdownMenuItem onClick={onSearchClick}>
+              {isSearchOpen ? 'Close search' : 'Search'}
+            </DropdownMenuItem>
             <DropdownMenuItem>Mute notifications</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onInfoClick}>
@@ -320,53 +469,141 @@ function ConversationHeader({
   );
 }
 
+interface ConversationSearchBarProps {
+  query: string;
+  onQueryChange: (value: string) => void;
+  activeMatchIndex: number;
+  totalMatches: number;
+  onNavigateUp: () => void;
+  onNavigateDown: () => void;
+  onClose: () => void;
+}
+
+function ConversationSearchBar({
+  query,
+  onQueryChange,
+  activeMatchIndex,
+  totalMatches,
+  onNavigateUp,
+  onNavigateDown,
+  onClose,
+}: ConversationSearchBarProps) {
+  const currentMatchLabel = totalMatches === 0 ? '0/0' : `${activeMatchIndex + 1}/${totalMatches}`;
+
+  return (
+    <div className="border-b bg-background px-3 py-2">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            autoFocus
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                if (event.shiftKey) {
+                  onNavigateUp();
+                } else {
+                  onNavigateDown();
+                }
+              }
+            }}
+            placeholder="Search messages"
+            className="pl-9"
+          />
+        </div>
+
+        <span className="min-w-10 text-center text-xs text-muted-foreground">
+          {currentMatchLabel}
+        </span>
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onNavigateUp}
+          disabled={totalMatches === 0}
+        >
+          <ChevronUp className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onNavigateDown}
+          disabled={totalMatches === 0}
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface MessageListProps {
   messages: Message[];
   currentUserId: string;
   onOpenMedia: (message: Message) => void;
+  activeMatchId: string | null;
+  matchedMessageIds: Set<string>;
 }
 
-function MessageList({ messages, currentUserId, onOpenMedia }: MessageListProps) {
+function MessageList({
+  messages,
+  currentUserId,
+  onOpenMedia,
+  activeMatchId,
+  matchedMessageIds,
+}: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef(new Map<string, HTMLDivElement | null>());
   
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
+    if (activeMatchId) {
+      return;
+    }
+
     if (scrollRef.current) {
       const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (scrollContainer) {
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
       }
     }
-  }, [messages]);
+  }, [activeMatchId, messages]);
+
+  useEffect(() => {
+    if (!activeMatchId) {
+      return;
+    }
+
+    const target = messageRefs.current.get(activeMatchId);
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [activeMatchId]);
   
   // Group messages by date
-  const groupedMessages = messages.reduce<{ date: Date; messages: Message[] }[]>(
+  const groupedMessages = messages.reduce<{ dateKey: string; date: Date; messages: Message[] }[]>(
     (groups, message) => {
-      const messageDate = new Date(message.timestamp);
-      messageDate.setHours(0, 0, 0, 0);
+      const messageDateKey = getIstDateKey(message.timestamp);
       
-      const existingGroup = groups.find(g => {
-        const groupDate = new Date(g.date);
-        groupDate.setHours(0, 0, 0, 0);
-        return groupDate.getTime() === messageDate.getTime();
-      });
+      const existingGroup = groups.find(g => g.dateKey === messageDateKey);
       
       if (existingGroup) {
         existingGroup.messages.push(message);
       } else {
-        groups.push({ date: message.timestamp, messages: [message] });
+        groups.push({ dateKey: messageDateKey, date: message.timestamp, messages: [message] });
       }
       
       return groups;
     },
     []
   );
-  
-  const formatDateHeader = (date: Date) => {
-    if (isToday(date)) return 'Today';
-    if (isYesterday(date)) return 'Yesterday';
-    return format(date, 'MMMM d, yyyy');
-  };
   
   return (
     <ScrollArea ref={scrollRef} className="h-full p-4">
@@ -375,24 +612,36 @@ function MessageList({ messages, currentUserId, onOpenMedia }: MessageListProps)
           <div key={groupIndex}>
             <div className="sticky top-0 z-10 -mx-4 mb-4 flex justify-center px-4 py-2">
               <span className="rounded-full bg-muted/95 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
-                {formatDateHeader(group.date)}
+                {formatDateHeaderInIst(group.date)}
               </span>
             </div>
             {group.messages.map((message, messageIndex) => (
-              <MessageBubble
+              <div
                 key={message.id}
-                message={message}
-                isOwn={message.senderId === currentUserId}
-                onOpenMedia={onOpenMedia}
-                showTimestamp={
-                  messageIndex === group.messages.length - 1 ||
-                  group.messages[messageIndex + 1]?.senderId !== message.senderId ||
-                  Math.abs(
-                    new Date(group.messages[messageIndex + 1]?.timestamp).getTime() -
-                      new Date(message.timestamp).getTime()
-                  ) > 300000
-                }
-              />
+                ref={(node) => {
+                  if (node) {
+                    messageRefs.current.set(message.id, node);
+                  } else {
+                    messageRefs.current.delete(message.id);
+                  }
+                }}
+              >
+                <MessageBubble
+                  message={message}
+                  isOwn={message.senderId === currentUserId}
+                  onOpenMedia={onOpenMedia}
+                  isMatched={matchedMessageIds.has(message.id)}
+                  isActiveMatch={activeMatchId === message.id}
+                  showTimestamp={
+                    messageIndex === group.messages.length - 1 ||
+                    group.messages[messageIndex + 1]?.senderId !== message.senderId ||
+                    Math.abs(
+                      new Date(group.messages[messageIndex + 1]?.timestamp).getTime() -
+                        new Date(message.timestamp).getTime()
+                    ) > 300000
+                  }
+                />
+              </div>
             ))}
           </div>
         ))}
@@ -405,10 +654,19 @@ interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
   onOpenMedia: (message: Message) => void;
+  isMatched: boolean;
+  isActiveMatch: boolean;
   showTimestamp: boolean;
 }
 
-function MessageBubble({ message, isOwn, onOpenMedia, showTimestamp }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  isOwn,
+  onOpenMedia,
+  isMatched,
+  isActiveMatch,
+  showTimestamp,
+}: MessageBubbleProps) {
   const isSending = message.status === 'pending';
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
@@ -430,10 +688,12 @@ function MessageBubble({ message, isOwn, onOpenMedia, showTimestamp }: MessageBu
     >
       <div
         className={cn(
-          'w-fit max-w-[min(85vw,24rem)] rounded-lg px-3 py-2',
+          'w-fit max-w-[min(85vw,24rem)] rounded-lg px-3 py-2 transition-shadow',
           isOwn
             ? 'bg-primary text-primary-foreground'
-            : 'bg-muted'
+            : 'bg-muted',
+          isActiveMatch && 'ring-2 ring-primary/50 shadow-sm',
+          !isActiveMatch && isMatched && 'ring-1 ring-primary/20'
         )}
       >
         <MessageBubbleContent message={message} isOwn={isOwn} onOpenMedia={onOpenMedia} />
@@ -444,7 +704,7 @@ function MessageBubble({ message, isOwn, onOpenMedia, showTimestamp }: MessageBu
               isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground'
             )}
           >
-            <span>{format(message.timestamp, 'h:mm a')}</span>
+            <span>{formatTimeInIst(message.timestamp)}</span>
             {isOwn && renderStatusIcon()}
           </div>
         )}

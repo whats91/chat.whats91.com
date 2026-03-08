@@ -585,7 +585,7 @@ export async function getConversationById({
     const messages = await queryConversationsDb<any>(
       `SELECT * FROM conversation_messages 
        WHERE conversation_id = ? 
-       ORDER BY timestamp DESC 
+       ORDER BY timestamp DESC, id DESC
        LIMIT ? OFFSET ?`,
       [conversationId, limit, offset]
     );

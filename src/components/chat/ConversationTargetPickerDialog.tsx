@@ -3,10 +3,12 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -14,14 +16,19 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { fetchConversationTargets } from '@/lib/api/client';
 import type { ConversationTarget } from '@/lib/types/chat';
-import { Search } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Check, Search } from 'lucide-react';
 
 interface ConversationTargetPickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
-  onSelect: (target: ConversationTarget) => Promise<void> | void;
+  onSelect?: (target: ConversationTarget) => Promise<void> | void;
+  onConfirmSelection?: (targets: ConversationTarget[]) => Promise<void> | void;
+  selectionMode?: 'single' | 'multiple';
+  confirmLabel?: string;
+  confirmButtonText?: string;
 }
 
 function normalizePhoneInput(value: string): string {
@@ -47,6 +54,10 @@ export function ConversationTargetPickerDialog({
   title,
   description,
   onSelect,
+  onConfirmSelection,
+  selectionMode = 'single',
+  confirmLabel,
+  confirmButtonText = 'Forward',
 }: ConversationTargetPickerDialogProps) {
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
@@ -54,6 +65,8 @@ export function ConversationTargetPickerDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
+  const [selectedTargetsState, setSelectedTargetsState] = useState<ConversationTarget[]>([]);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -61,6 +74,8 @@ export function ConversationTargetPickerDialog({
       setTargets([]);
       setError(null);
       setPendingTargetId(null);
+      setSelectedTargetsState([]);
+      setIsConfirming(false);
       return;
     }
 
@@ -128,7 +143,16 @@ export function ConversationTargetPickerDialog({
     return manualTarget ? [manualTarget, ...targets] : targets;
   }, [search, targets]);
 
+  const selectedTargetIds = useMemo(
+    () => selectedTargetsState.map((target) => target.id),
+    [selectedTargetsState]
+  );
+
   const handleSelect = async (target: ConversationTarget) => {
+    if (!onSelect) {
+      return;
+    }
+
     try {
       setPendingTargetId(target.id);
       setError(null);
@@ -140,12 +164,42 @@ export function ConversationTargetPickerDialog({
     }
   };
 
+  const handleToggleSelection = (target: ConversationTarget) => {
+    setSelectedTargetsState((current) =>
+      current.some((item) => item.id === target.id)
+        ? current.filter((item) => item.id !== target.id)
+        : [...current, target]
+    );
+  };
+
+  const handleConfirmSelection = async () => {
+    if (!onConfirmSelection || selectedTargetsState.length === 0) {
+      return;
+    }
+
+    try {
+      setIsConfirming(true);
+      setError(null);
+      await onConfirmSelection(selectedTargetsState);
+    } catch (confirmError) {
+      setError(confirmError instanceof Error ? confirmError.message : 'Unable to complete selection');
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  const isMultiple = selectionMode === 'multiple';
+  const effectiveDescription =
+    isMultiple && selectedTargetsState.length > 0
+      ? `${selectedTargetsState.length} recipient${selectedTargetsState.length === 1 ? '' : 's'} selected`
+      : description;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          {description ? <DialogDescription>{description}</DialogDescription> : null}
+          {effectiveDescription ? <DialogDescription>{effectiveDescription}</DialogDescription> : null}
         </DialogHeader>
 
         <div className="relative mt-2">
@@ -168,9 +222,17 @@ export function ConversationTargetPickerDialog({
                 <button
                   key={target.id}
                   type="button"
-                  disabled={pendingTargetId !== null}
-                  className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-muted/50 disabled:cursor-wait disabled:opacity-70"
+                  disabled={pendingTargetId !== null || isConfirming}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-muted/50 disabled:cursor-wait disabled:opacity-70',
+                    isMultiple && selectedTargetIds.includes(target.id) && 'bg-primary/10 ring-1 ring-primary/20'
+                  )}
                   onClick={() => {
+                    if (isMultiple) {
+                      handleToggleSelection(target);
+                      return;
+                    }
+
                     void handleSelect(target);
                   }}
                 >
@@ -185,13 +247,26 @@ export function ConversationTargetPickerDialog({
                     <div className="flex items-center gap-2">
                       <p className="truncate font-medium">{displayName}</p>
                       <Badge variant="secondary" className="shrink-0">
-                        {target.conversationId ? 'Recent' : 'Contact'}
+                      {target.conversationId ? 'Recent' : 'Contact'}
                       </Badge>
                     </div>
                     <p className="truncate text-sm text-muted-foreground">
                       {formatPhoneDisplay(target.phone)}
                     </p>
                   </div>
+
+                  {isMultiple ? (
+                    <div
+                      className={cn(
+                        'flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+                        selectedTargetIds.includes(target.id)
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border'
+                      )}
+                    >
+                      {selectedTargetIds.includes(target.id) ? <Check className="h-3.5 w-3.5" /> : null}
+                    </div>
+                  ) : null}
                 </button>
               );
             })}
@@ -215,6 +290,28 @@ export function ConversationTargetPickerDialog({
             ) : null}
           </div>
         </ScrollArea>
+
+        {isMultiple ? (
+          <DialogFooter className="mt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isConfirming}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                void handleConfirmSelection();
+              }}
+              disabled={selectedTargetsState.length === 0 || isConfirming}
+            >
+              {isConfirming ? 'Forwarding...' : `${confirmButtonText}${confirmLabel ? ` ${confirmLabel}` : ''}`}
+            </Button>
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

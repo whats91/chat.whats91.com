@@ -18,6 +18,29 @@ interface ChatLabel {
   color: string;
 }
 
+function toMessageDate(value: Message['timestamp'] | string | number): Date {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function compareMessages(left: Message, right: Message): number {
+  const timestampDiff = toMessageDate(left.timestamp).getTime() - toMessageDate(right.timestamp).getTime();
+  if (timestampDiff !== 0) {
+    return timestampDiff;
+  }
+
+  const leftId = Number(left.id);
+  const rightId = Number(right.id);
+  if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
+    return leftId - rightId;
+  }
+
+  return String(left.id).localeCompare(String(right.id));
+}
+
+function sortMessagesChronologically(messages: Message[]): Message[] {
+  return [...messages].sort(compareMessages);
+}
+
 interface ChatState {
   // Conversations
   conversations: Conversation[];
@@ -109,6 +132,15 @@ export const useChatStore = create<ChatState>()(
             // Transform API response to match frontend types
             const conversations: Conversation[] = response.data.conversations.map(conv => ({
               id: String(conv.id),
+              userId: getCurrentUserId(),
+              contactPhone: conv.contactPhone,
+              contactName: conv.contactName,
+              whatsappPhoneNumberId: '',
+              lastMessageId: conv.lastMessageContent ? `last-${conv.id}` : null,
+              lastMessageContent: conv.lastMessageContent,
+              lastMessageType: (conv.lastMessageType || 'text') as Message['type'],
+              lastMessageAt: conv.lastMessageAt ? new Date(conv.lastMessageAt) : null,
+              lastMessageDirection: conv.lastMessageDirection,
               participant: {
                 id: String(conv.id),
                 name: conv.displayName,
@@ -119,17 +151,24 @@ export const useChatStore = create<ChatState>()(
               lastMessage: conv.lastMessageContent ? {
                 id: `last-${conv.id}`,
                 conversationId: String(conv.id),
+                whatsappMessageId: `last-${conv.id}`,
                 senderId: conv.lastMessageDirection === 'inbound' ? String(conv.id) : getCurrentUserId(),
+                fromPhone: conv.contactPhone,
+                toPhone: '',
+                direction: conv.lastMessageDirection || 'outbound',
                 content: conv.lastMessageContent,
                 type: (conv.lastMessageType || 'text') as Message['type'],
                 status: 'read',
                 timestamp: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
+                isRead: true,
               } : undefined,
               unreadCount: conv.unreadCount,
+              totalMessages: 0,
               isPinned: conv.isPinned,
               isArchived: conv.isArchived,
               isMuted: conv.isMuted,
-              labels: [],
+              status: conv.status,
+              metaData: null,
               createdAt: new Date(),
               updatedAt: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
             }));
@@ -197,7 +236,7 @@ export const useChatStore = create<ChatState>()(
               const existing = newMap.get(conversationId) || [];
               // Prepend older messages if loading more
               const allMessages = page > 1 ? [...messages, ...existing] : messages;
-              newMap.set(conversationId, allMessages);
+              newMap.set(conversationId, sortMessagesChronologically(allMessages));
               
               return {
                 messagesByConversation: newMap,
@@ -272,13 +311,14 @@ export const useChatStore = create<ChatState>()(
           content,
           status: 'pending',
           timestamp: new Date(),
+          isRead: false,
           mediaUrl,
         };
         
         set((state) => {
           const newMap = new Map(state.messagesByConversation);
           const messages = newMap.get(conversationId) || [];
-          newMap.set(conversationId, [...messages, tempMessage]);
+          newMap.set(conversationId, sortMessagesChronologically([...messages, tempMessage]));
           return { messagesByConversation: newMap };
         });
         
@@ -306,7 +346,7 @@ export const useChatStore = create<ChatState>()(
                     }
                   : m
               );
-              newMap.set(conversationId, updatedMessages);
+              newMap.set(conversationId, sortMessagesChronologically(updatedMessages));
               return { messagesByConversation: newMap };
             });
           } else {
@@ -317,7 +357,7 @@ export const useChatStore = create<ChatState>()(
               const updatedMessages = messages.map(m => 
                 m.id === tempId ? { ...m, status: 'failed' as const } : m
               );
-              newMap.set(conversationId, updatedMessages);
+              newMap.set(conversationId, sortMessagesChronologically(updatedMessages));
               return { messagesByConversation: newMap };
             });
           }
@@ -329,7 +369,7 @@ export const useChatStore = create<ChatState>()(
             const updatedMessages = messages.map(m => 
               m.id === tempId ? { ...m, status: 'failed' as const } : m
             );
-            newMap.set(conversationId, updatedMessages);
+            newMap.set(conversationId, sortMessagesChronologically(updatedMessages));
             return { messagesByConversation: newMap };
           });
         }
@@ -383,10 +423,17 @@ export const useChatStore = create<ChatState>()(
           // Add message to conversation
           const newMap = new Map(state.messagesByConversation);
           const messages = newMap.get(conversationKey) || [];
-          newMap.set(conversationKey, [
-            ...messages,
-            { ...message, conversationId: conversationKey },
-          ]);
+          newMap.set(
+            conversationKey,
+            sortMessagesChronologically([
+              ...messages,
+              {
+                ...message,
+                conversationId: conversationKey,
+                timestamp: toMessageDate(message.timestamp as Date | string),
+              },
+            ])
+          );
           
           // Update conversation preview
           const conversations = state.conversations.map(conv => {
@@ -447,9 +494,9 @@ export const useChatStore = create<ChatState>()(
         
         if (query) {
           filtered = filtered.filter(conv => 
-            conv.participant.name.toLowerCase().includes(query) ||
-            conv.participant.phone.includes(query) ||
-            conv.lastMessage?.content.toLowerCase().includes(query)
+            conv.participant?.name.toLowerCase().includes(query) ||
+            conv.participant?.phone.includes(query) ||
+            conv.lastMessage?.content?.toLowerCase().includes(query)
           );
         }
         
