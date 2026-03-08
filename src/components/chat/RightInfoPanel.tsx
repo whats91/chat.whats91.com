@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
+import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
 import { StarredMessagesDialog } from '@/components/chat/StarredMessagesDialog';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -17,7 +18,6 @@ import {
   Ban,
   Trash2,
   Eraser,
-  Flag,
   Search,
   ChevronDown,
   Tag,
@@ -30,10 +30,12 @@ interface RightInfoPanelProps {
 }
 
 export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
-  const { conversations, labels, muteConversation } = useChatStore();
+  const { conversations, labels, muteConversation, blockConversation } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
+  const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
+  const [isUpdatingBlock, setIsUpdatingBlock] = useState(false);
   
   if (!conversation) {
     return null;
@@ -116,12 +118,15 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         
         {/* Media & Links */}
         <div className="p-4">
-          <button className="flex items-center justify-between w-full text-left">
+          <button
+            className="flex items-center justify-between w-full text-left"
+            onClick={() => setIsMediaDialogOpen(true)}
+          >
             <div className="flex items-center gap-3">
               <ImageIcon className="h-5 w-5 text-muted-foreground" />
               <div>
                 <p className="text-sm font-medium">Media, links, and docs</p>
-                <p className="text-xs text-muted-foreground">128 items</p>
+                <p className="text-xs text-muted-foreground">View conversation media and links</p>
               </div>
             </div>
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -169,13 +174,24 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         
         {/* Danger Zone */}
         <div className="p-4 space-y-3">
-          <button className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2">
+          <button
+            className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2 disabled:cursor-wait disabled:opacity-70"
+            disabled={isUpdatingBlock}
+            onClick={() => {
+              setIsUpdatingBlock(true);
+              void blockConversation(conversation.id).finally(() => setIsUpdatingBlock(false));
+            }}
+          >
             <Ban className="h-5 w-5" />
-            <span className="text-sm">Block contact</span>
-          </button>
-          <button className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2">
-            <Flag className="h-5 w-5" />
-            <span className="text-sm">Report contact</span>
+            <span className="text-sm">
+              {isUpdatingBlock
+                ? conversation.isBlocked
+                  ? 'Unblocking contact...'
+                  : 'Blocking contact...'
+                : conversation.isBlocked
+                  ? 'Unblock contact'
+                  : 'Block contact'}
+            </span>
           </button>
           <button
             className="flex items-center gap-3 w-full text-left hover:bg-muted/50 rounded-lg p-2 -mx-2"
@@ -209,6 +225,13 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
       <StarredMessagesDialog
         open={isStarredDialogOpen}
         onOpenChange={setIsStarredDialogOpen}
+        conversationId={conversation.id}
+        conversationName={participantName}
+      />
+
+      <ConversationMediaDialog
+        open={isMediaDialogOpen}
+        onOpenChange={setIsMediaDialogOpen}
         conversationId={conversation.id}
         conversationName={participantName}
       />

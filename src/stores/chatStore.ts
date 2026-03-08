@@ -15,6 +15,7 @@ import {
   fetchConversation,
   sendMessage as apiSendMessage,
   toggleArchive as apiToggleArchive,
+  toggleBlock as apiToggleBlock,
   toggleMessagePinned as apiToggleMessagePinned,
   toggleMessageStarred as apiToggleMessageStarred,
   toggleMute as apiToggleMute,
@@ -162,6 +163,7 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
     isPinned: conv.isPinned,
     isArchived: conv.isArchived,
     isMuted: conv.isMuted,
+    isBlocked: conv.isBlocked,
     status: conv.status,
     metaData: null,
     createdAt: new Date(),
@@ -222,6 +224,7 @@ interface ChatState {
   pinConversation: (id: string) => Promise<void>;
   archiveConversation: (id: string) => Promise<void>;
   muteConversation: (id: string) => Promise<void>;
+  blockConversation: (id: string) => Promise<void>;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   toggleMessagePinned: (conversationId: string, messageId: string) => Promise<void>;
@@ -378,6 +381,15 @@ export const useChatStore = create<ChatState>()(
               
               return {
                 messagesByConversation: newMap,
+                conversations: state.conversations.map((conversation) =>
+                  conversation.id === conversationId
+                    ? {
+                        ...conversation,
+                        isBlocked: response.data.conversation.isBlocked,
+                        status: response.data.conversation.status,
+                      }
+                    : conversation
+                ),
                 hasMoreMessages: response.data.pagination.hasMore,
                 isLoadingMessages: false,
               };
@@ -599,6 +611,27 @@ export const useChatStore = create<ChatState>()(
         } catch (error) {
           set({
             conversationsError: error instanceof Error ? error.message : 'Failed to update mute state',
+          });
+        }
+      },
+
+      blockConversation: async (id) => {
+        try {
+          const response = await apiToggleBlock(id);
+          if (!response.success) {
+            throw new Error(response.message || 'Failed to update block state');
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((conv) =>
+              conv.id === id
+                ? { ...conv, isBlocked: response.data?.isBlocked ?? !conv.isBlocked }
+                : conv
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update block state',
           });
         }
       },

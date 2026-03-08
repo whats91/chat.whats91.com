@@ -149,6 +149,7 @@ model Conversation {
   isArchived            Boolean   @default(false) @map("is_archived")
   isPinned              Boolean   @default(false) @map("is_pinned")
   isMuted               Boolean   @default(false) @map("is_muted")
+  isBlocked             Boolean   @default(false) @map("is_blocked")
   status                String    @default("active")
   
   metaData              String?   @map("meta_data")

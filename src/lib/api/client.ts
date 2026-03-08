@@ -9,6 +9,7 @@ import type {
   ConversationDetailResponse,
   PinnedMessageResponse,
   StarredMessagesResponse,
+  ConversationMediaResponse,
   ConversationTargetListResponse,
   SendMessageRequest,
   SendMessageResponse,
@@ -109,6 +110,23 @@ export async function fetchStarredMessages(
   return response.json();
 }
 
+export async function fetchConversationMedia(
+  conversationId: string | number,
+  params: { limit?: number } = {}
+): Promise<ConversationMediaResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.limit) searchParams.set('limit', String(params.limit));
+
+  const response = await fetch(
+    `${API_BASE}/conversations/${conversationId}/media?${searchParams.toString()}`,
+    {
+      headers: getHeaders(),
+    }
+  );
+
+  return response.json();
+}
+
 /**
  * Send a message
  */
@@ -170,6 +188,18 @@ export async function markAsRead(conversationId: string | number): Promise<{ suc
  */
 export async function toggleMute(conversationId: string | number): Promise<{ success: boolean; message: string; data?: { isMuted: boolean } }> {
   const response = await fetch(`${API_BASE}/conversations/${conversationId}/mute`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+/**
+ * Toggle blocked status
+ */
+export async function toggleBlock(conversationId: string | number): Promise<{ success: boolean; message: string; data?: { isBlocked: boolean } }> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/block`, {
     method: 'PATCH',
     headers: getHeaders(),
   });
@@ -284,11 +314,13 @@ export const api = {
     get: fetchConversation,
     getPinnedMessage: fetchPinnedMessage,
     getStarredMessages: fetchStarredMessages,
+    getConversationMedia: fetchConversationMedia,
     sendMessage,
     fetchConversationTargets,
     startConversation,
     markAsRead,
     toggleMute,
+    toggleBlock,
     toggleArchive,
     togglePin,
     toggleMessagePinned,

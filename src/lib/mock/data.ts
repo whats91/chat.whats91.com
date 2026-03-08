@@ -148,6 +148,7 @@ export function generateMockConversations(): Conversation[] {
     isPinned: index < 2,
     isArchived: index === 5,
     isMuted: index === 6,
+    isBlocked: false,
     labels: index === 4 ? ['VIP', 'Support'] : index === 5 ? ['Lead'] : [],
     createdAt: new Date(Date.now() - index * 86400000 * 2),
     updatedAt: new Date(Date.now() - index * 3600000),

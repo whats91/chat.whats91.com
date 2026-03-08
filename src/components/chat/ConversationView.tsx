@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
+import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
 import { cn } from '@/lib/utils';
@@ -140,6 +141,7 @@ export function ConversationView({
   const {
     conversations,
     archiveConversation,
+    blockConversation,
     getMessages,
     muteConversation,
     pinConversation,
@@ -152,6 +154,7 @@ export function ConversationView({
   const conversationRootRef = useRef<HTMLDivElement | null>(null);
   const [viewerMessage, setViewerMessage] = useState<Message | null>(null);
   const [isForwardPickerOpen, setIsForwardPickerOpen] = useState(false);
+  const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
@@ -367,6 +370,7 @@ export function ConversationView({
         showBackButton={showBackButton}
         onSearchClick={() => setIsSearchOpen((current) => !current)}
         isSearchOpen={isSearchOpen}
+        onViewMedia={() => setIsMediaDialogOpen(true)}
         onInfoClick={() => toggleRightPanel()}
         isInfoOpen={isRightPanelOpen}
         onMuteToggle={() => {
@@ -377,6 +381,9 @@ export function ConversationView({
         }}
         onPinToggle={() => {
           void pinConversation(conversation.id);
+        }}
+        onBlockToggle={() => {
+          void blockConversation(conversation.id);
         }}
         onClearChat={() => setDangerAction('clear')}
         onDeleteConversation={() => setDangerAction('delete')}
@@ -416,6 +423,7 @@ export function ConversationView({
       {/* Composer - fixed at bottom */}
       <MessageComposer
         conversationId={conversationId}
+        isBlocked={conversation.isBlocked}
         onSend={(content) => sendMessage(conversationId, content)}
       />
 
@@ -444,6 +452,13 @@ export function ConversationView({
         allowManualEntry={false}
         sourceFilter="conversation"
         onConfirmSelection={handleForwardConfirm}
+      />
+
+      <ConversationMediaDialog
+        open={isMediaDialogOpen}
+        onOpenChange={setIsMediaDialogOpen}
+        conversationId={conversation.id}
+        conversationName={conversation.participant?.name || conversation.contactName || conversation.contactPhone}
       />
 
       <ConversationDangerDialog
@@ -509,11 +524,13 @@ interface ConversationHeaderProps {
   showBackButton: boolean;
   onSearchClick: () => void;
   isSearchOpen: boolean;
+  onViewMedia: () => void;
   onInfoClick: () => void;
   isInfoOpen: boolean;
   onMuteToggle: () => void;
   onArchiveToggle: () => void;
   onPinToggle: () => void;
+  onBlockToggle: () => void;
   onClearChat: () => void;
   onDeleteConversation: () => void;
 }
@@ -524,11 +541,13 @@ function ConversationHeader({
   showBackButton,
   onSearchClick,
   isSearchOpen,
+  onViewMedia,
   onInfoClick,
   isInfoOpen,
   onMuteToggle,
   onArchiveToggle,
   onPinToggle,
+  onBlockToggle,
   onClearChat,
   onDeleteConversation,
 }: ConversationHeaderProps) {
@@ -618,7 +637,7 @@ function ConversationHeader({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem>View contact</DropdownMenuItem>
-            <DropdownMenuItem>Media, links, and docs</DropdownMenuItem>
+            <DropdownMenuItem onClick={onViewMedia}>Media, links, and docs</DropdownMenuItem>
             <DropdownMenuItem onClick={onSearchClick}>
               {isSearchOpen ? 'Close search' : 'Search'}
             </DropdownMenuItem>
@@ -640,7 +659,9 @@ function ConversationHeader({
               {conversation.isArchived ? 'Unarchive chat' : 'Archive chat'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">Block</DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive" onClick={onBlockToggle}>
+              {conversation.isBlocked ? 'Unblock' : 'Block'}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onClearChat}>
               <Trash2 className="h-4 w-4 mr-2" />
               Clear chat
@@ -986,15 +1007,16 @@ function MessageBubble({
 
 interface MessageComposerProps {
   conversationId: string;
+  isBlocked: boolean;
   onSend: (content: string) => void;
 }
 
-function MessageComposer({ onSend }: MessageComposerProps) {
+function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
   const [message, setMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   
   const handleSend = () => {
-    if (message.trim()) {
+    if (!isBlocked && message.trim()) {
       onSend(message.trim());
       setMessage('');
     }
@@ -1009,11 +1031,16 @@ function MessageComposer({ onSend }: MessageComposerProps) {
   
   return (
     <div className="p-3 border-t bg-background">
+      {isBlocked ? (
+        <div className="mb-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          This contact is blocked. Unblock the contact to send messages.
+        </div>
+      ) : null}
       <div className="flex items-end gap-2">
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0">
+              <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" disabled={isBlocked}>
                 <Smile className="h-5 w-5 text-muted-foreground" />
               </Button>
             </TooltipTrigger>
@@ -1022,7 +1049,7 @@ function MessageComposer({ onSend }: MessageComposerProps) {
           
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0">
+              <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" disabled={isBlocked}>
                 <Paperclip className="h-5 w-5 text-muted-foreground" />
               </Button>
             </TooltipTrigger>
@@ -1035,19 +1062,21 @@ function MessageComposer({ onSend }: MessageComposerProps) {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message"
+            placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
+            disabled={isBlocked}
             className="pr-10"
           />
           <Button
             variant="ghost"
             size="icon"
             className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+            disabled={isBlocked}
           >
             <ImageIcon className="h-4 w-4 text-muted-foreground" />
           </Button>
         </div>
         
-        {message.trim() ? (
+        {!isBlocked && message.trim() ? (
           <Button
             size="icon"
             className="h-9 w-9 flex-shrink-0"
@@ -1063,6 +1092,7 @@ function MessageComposer({ onSend }: MessageComposerProps) {
                   variant="ghost"
                   size="icon"
                   className={cn('h-9 w-9 flex-shrink-0', isRecording && 'text-destructive')}
+                  disabled={isBlocked}
                   onMouseDown={() => setIsRecording(true)}
                   onMouseUp={() => setIsRecording(false)}
                   onMouseLeave={() => setIsRecording(false)}

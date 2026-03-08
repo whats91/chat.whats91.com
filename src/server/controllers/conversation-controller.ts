@@ -117,6 +117,10 @@ function isMediaMessageType(value: string | null | undefined): boolean {
   return Boolean(value && MEDIA_MESSAGE_TYPES.has(value));
 }
 
+function isConversationBlocked(value: unknown): boolean {
+  return Boolean(value);
+}
+
 function mapConversationMessageRowToMessage(msg: any): Message {
   return {
     id: String(msg.id),
@@ -181,7 +185,7 @@ export async function getConversations({
         id, contact_phone, contact_name, whatsapp_phone_number_id,
         last_message_id, last_message_content, last_message_type,
         last_message_at, last_message_direction, unread_count,
-        total_messages, is_archived, is_pinned, is_muted, status,
+        total_messages, is_archived, is_pinned, is_muted, is_blocked, status,
         created_at, updated_at
       FROM conversations
       WHERE user_id = ?
@@ -264,6 +268,7 @@ export async function getConversations({
       isPinned: conv.is_pinned || false,
       isArchived: conv.is_archived || false,
       isMuted: conv.is_muted || false,
+      isBlocked: conv.is_blocked || false,
       status: conv.status,
     }));
     
@@ -652,6 +657,8 @@ export async function getConversationById({
           displayName: getDisplayName(conversation.contact_name, conversation.contact_phone),
           contactPhone: conversation.contact_phone,
           contactName: conversation.contact_name,
+          isBlocked: Boolean(conversation.is_blocked),
+          status: conversation.status,
         },
         messages: formattedMessages,
         pagination: {
@@ -735,6 +742,49 @@ export async function getStarredMessages(
   }
 }
 
+export async function getConversationMediaMessages(
+  conversationId: number,
+  userId: string,
+  limit = 250
+) {
+  try {
+    const safeLimit = Math.min(Math.max(limit, 1), 500);
+    const mediaMessageTypes = Array.from(MEDIA_MESSAGE_TYPES);
+    const placeholders = mediaMessageTypes.map(() => '?').join(', ');
+
+    const messages = await queryConversationsDb<any>(
+      `SELECT cm.*
+       FROM conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       WHERE cm.conversation_id = ? AND c.user_id = ?
+         AND (
+           cm.media_url IS NOT NULL
+           OR cm.message_type IN (${placeholders})
+           OR cm.message_content LIKE '%http://%'
+           OR cm.message_content LIKE '%https://%'
+         )
+       ORDER BY cm.timestamp DESC, cm.id DESC
+       LIMIT ?`,
+      [conversationId, userId, ...mediaMessageTypes, safeLimit]
+    );
+
+    return {
+      success: true,
+      message: 'Conversation media retrieved successfully',
+      data: {
+        messages: messages.map(mapConversationMessageRowToMessage),
+      },
+    };
+  } catch (error) {
+    log.error('getConversationMediaMessages error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to retrieve conversation media',
+      data: null,
+    };
+  }
+}
+
 // ========================================
 // SEND MESSAGE
 // ========================================
@@ -769,6 +819,14 @@ export async function sendMessage({
       return {
         success: false,
         message: 'Conversation not found',
+        data: null,
+      };
+    }
+
+    if (isConversationBlocked(conversation.is_blocked)) {
+      return {
+        success: false,
+        message: 'This contact is blocked. Unblock the contact to send messages.',
         data: null,
       };
     }
@@ -1209,6 +1267,41 @@ export async function toggleMuteConversation(conversationId: number, userId: str
 }
 
 // ========================================
+// TOGGLE BLOCK
+// ========================================
+
+export async function toggleBlockConversation(conversationId: number, userId: string) {
+  try {
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT is_blocked FROM conversations WHERE id = ? AND user_id = ?`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+
+    const newBlockedState = !Boolean(conversation.is_blocked);
+
+    await executeConversationsDb(
+      `UPDATE conversations
+       SET is_blocked = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [newBlockedState, conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: newBlockedState ? 'Contact blocked' : 'Contact unblocked',
+      data: { isBlocked: newBlockedState },
+    };
+  } catch (error) {
+    log.error('toggleBlock error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to update block state' };
+  }
+}
+
+// ========================================
 // CLEAR CONVERSATION
 // ========================================
 
@@ -1356,6 +1449,14 @@ export async function processIncomingMessage(data: IncomingMessageData) {
         `SELECT * FROM conversations WHERE user_id = ? AND contact_phone = ? AND whatsapp_phone_number_id = ?`,
         [userId, normalizedPhone, phoneNumberId]
       );
+    }
+
+    if (conversation && isConversationBlocked(conversation.is_blocked)) {
+      return {
+        success: true,
+        message: 'Blocked contact message ignored',
+        conversationId: conversation.id,
+      };
     }
     
     // Check if message already exists
@@ -1623,11 +1724,13 @@ export const conversationController = {
   getConversationById,
   getPinnedMessage,
   getStarredMessages,
+  getConversationMediaMessages,
   sendMessage,
   markAsRead: markConversationAsRead,
   toggleArchive: toggleArchiveConversation,
   togglePin: togglePinConversation,
   toggleMute: toggleMuteConversation,
+  toggleBlock: toggleBlockConversation,
   toggleMessagePinned,
   toggleMessageStarred,
   clear: clearConversation,

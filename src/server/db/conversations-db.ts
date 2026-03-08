@@ -56,6 +56,7 @@ export interface Conversation {
   isArchived: boolean;
   isPinned: boolean;
   isMuted: boolean;
+  isBlocked: boolean;
   status: 'active' | 'closed' | 'blocked';
   metaData: Record<string, unknown> | null;
   createdAt: Date;

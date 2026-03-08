@@ -118,6 +118,7 @@ export interface Conversation {
   isPinned: boolean;
   isArchived: boolean;
   isMuted: boolean;
+  isBlocked: boolean;
   status: ConversationStatus;
   
   // Metadata
@@ -154,6 +155,7 @@ export interface ConversationListItem {
   isPinned: boolean;
   isArchived: boolean;
   isMuted: boolean;
+  isBlocked: boolean;
   status: ConversationStatus;
 }
 
@@ -377,6 +379,8 @@ export interface ConversationDetailResponse {
       displayName: string;
       contactPhone: string;
       contactName: string | null;
+      isBlocked: boolean;
+      status: ConversationStatus;
     };
     messages: Message[];
     pagination: {
@@ -397,6 +401,14 @@ export interface PinnedMessageResponse {
 }
 
 export interface StarredMessagesResponse {
+  success: boolean;
+  message: string;
+  data: {
+    messages: Message[];
+  } | null;
+}
+
+export interface ConversationMediaResponse {
   success: boolean;
   message: string;
   data: {
