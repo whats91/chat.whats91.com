@@ -206,14 +206,12 @@ function applyMediaPayload(
   mediaPayload: unknown
 ): void {
   const media = parseObject(mediaPayload) || {};
+  const payloadMediaUrl = getString(media.link) || getString(media.url) || getString(media.id) || null;
 
   normalized.type = nextType;
-  normalized.mediaUrl =
-    getString(media.link) ||
-    getString(media.url) ||
-    normalized.mediaUrl ||
-    getString(media.id) ||
-    null;
+  // The DB-backed media URL is the durable source of truth. Outgoing payload links are often
+  // temporary signed URLs used only for the initial Meta send, so they should not override Wasabi.
+  normalized.mediaUrl = normalized.mediaUrl || payloadMediaUrl;
   normalized.mediaMimeType = getString(media.mime_type) || getString(media.mimeType) || normalized.mediaMimeType;
   normalized.mediaFilename = getString(media.filename) || normalized.mediaFilename;
   normalized.mediaCaption = getString(media.caption) || normalized.mediaCaption;

@@ -564,11 +564,7 @@ function ConversationHeader({
       <button
         type="button"
         className="flex-1 min-w-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/50"
-        onClick={() => {
-          if (!isInfoOpen) {
-            onInfoClick();
-          }
-        }}
+        onClick={onInfoClick}
       >
         <div className="font-medium truncate">{participantName}</div>
         <div className="text-xs text-muted-foreground">
