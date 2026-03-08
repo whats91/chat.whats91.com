@@ -118,8 +118,13 @@ function ConversationHeader({
   isInfoOpen,
 }: ConversationHeaderProps) {
   const { participant, typing } = conversation;
+  const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
+  const participantAvatar = participant?.avatar;
+  const participantPhone = participant?.phone || conversation.contactPhone;
+  const participantStatus = participant?.status;
+  const participantLastSeen = participant?.lastSeen;
   
-  const initials = participant.name
+  const initials = participantName
     .split(' ')
     .map(n => n[0])
     .join('')
@@ -135,23 +140,23 @@ function ConversationHeader({
       )}
       
       <Avatar className="h-10 w-10">
-        <AvatarImage src={participant.avatar} alt={participant.name} />
+        <AvatarImage src={participantAvatar} alt={participantName} />
         <AvatarFallback className="bg-primary/20 text-primary font-medium">
           {initials}
         </AvatarFallback>
       </Avatar>
       
       <div className="flex-1 min-w-0">
-        <div className="font-medium truncate">{participant.name}</div>
+        <div className="font-medium truncate">{participantName}</div>
         <div className="text-xs text-muted-foreground">
           {typing?.isTyping ? (
             <span className="text-primary">typing...</span>
-          ) : participant.status === 'online' ? (
+          ) : participantStatus === 'online' ? (
             'online'
-          ) : participant.lastSeen ? (
-            `last seen ${format(participant.lastSeen, 'h:mm a')}`
+          ) : participantLastSeen ? (
+            `last seen ${format(participantLastSeen, 'h:mm a')}`
           ) : (
-            participant.phone
+            participantPhone
           )}
         </div>
       </div>
@@ -277,10 +282,6 @@ function MessageList({ messages, currentUserId }: MessageListProps) {
                 key={message.id}
                 message={message}
                 isOwn={message.senderId === currentUserId}
-                showAvatar={
-                  messageIndex === group.messages.length - 1 ||
-                  group.messages[messageIndex + 1]?.senderId !== message.senderId
-                }
                 showTimestamp={
                   messageIndex === group.messages.length - 1 ||
                   group.messages[messageIndex + 1]?.senderId !== message.senderId ||
@@ -301,11 +302,10 @@ function MessageList({ messages, currentUserId }: MessageListProps) {
 interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
-  showAvatar: boolean;
   showTimestamp: boolean;
 }
 
-function MessageBubble({ message, isOwn, showAvatar, showTimestamp }: MessageBubbleProps) {
+function MessageBubble({ message, isOwn, showTimestamp }: MessageBubbleProps) {
   const isSending = message.status === 'pending';
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
@@ -321,14 +321,13 @@ function MessageBubble({ message, isOwn, showAvatar, showTimestamp }: MessageBub
   return (
     <div
       className={cn(
-        'flex gap-2 mb-1',
+        'mb-1 flex w-full',
         isOwn ? 'justify-end' : 'justify-start'
       )}
     >
-      {!isOwn && showAvatar && <div className="w-8" />}
       <div
         className={cn(
-          'max-w-[70%] rounded-lg px-3 py-2',
+          'w-fit max-w-[min(85vw,24rem)] rounded-lg px-3 py-2',
           isOwn
             ? 'bg-primary text-primary-foreground'
             : 'bg-muted'

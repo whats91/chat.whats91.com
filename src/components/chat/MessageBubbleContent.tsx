@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Badge } from '@/components/ui/badge';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
@@ -70,6 +71,9 @@ function formatWhatsAppText(text: string): string {
   safeText = safeText.replace(/~([^~]+)~/g, '<del>$1</del>');
   return safeText;
 }
+
+const STANDARD_MEDIA_CARD_CLASS = 'w-[min(20rem,calc(100vw-7rem))] max-w-full';
+const STICKER_MEDIA_CARD_CLASS = 'w-[min(14rem,calc(100vw-9rem))] max-w-full';
 
 function getPanelClass(isOwn: boolean): string {
   return cn(
@@ -164,14 +168,16 @@ function AttachmentFallback({
   title,
   description,
   isOwn,
+  className,
 }: {
   icon: typeof FileText;
   title: string;
   description?: string | null;
   isOwn: boolean;
+  className?: string;
 }) {
   return (
-    <div className={getPanelClass(isOwn)}>
+    <div className={cn(getPanelClass(isOwn), className)}>
       <div className="flex items-start gap-3">
         <div className="rounded-md bg-black/10 p-2">
           <Icon className="h-4 w-4" />
@@ -205,12 +211,13 @@ function ImageContent({
         title={sticker ? 'Sticker' : 'Image'}
         description={mediaUrl || 'Media URL unavailable'}
         isOwn={isOwn}
+        className={sticker ? STICKER_MEDIA_CARD_CLASS : STANDARD_MEDIA_CARD_CLASS}
       />
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', sticker ? STICKER_MEDIA_CARD_CLASS : STANDARD_MEDIA_CARD_CLASS)}>
       <div className="overflow-hidden rounded-md bg-black/10">
         <AspectRatio ratio={sticker ? 1 : 4 / 3}>
           <img
@@ -239,11 +246,19 @@ function VideoContent({
   isOwn: boolean;
 }) {
   if (!isRenderableMediaUrl(mediaUrl)) {
-    return <AttachmentFallback icon={Video} title="Video" description={mediaUrl || 'Media URL unavailable'} isOwn={isOwn} />;
+    return (
+      <AttachmentFallback
+        icon={Video}
+        title="Video"
+        description={mediaUrl || 'Media URL unavailable'}
+        isOwn={isOwn}
+        className={STANDARD_MEDIA_CARD_CLASS}
+      />
+    );
   }
 
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', STANDARD_MEDIA_CARD_CLASS)}>
       <video src={mediaUrl} controls preload="metadata" className="max-h-[360px] w-full rounded-md bg-black" />
       {caption && <RichText text={caption} className="text-inherit" />}
     </div>
@@ -260,17 +275,103 @@ function AudioContent({
   isOwn: boolean;
 }) {
   if (!isRenderableMediaUrl(mediaUrl)) {
-    return <AttachmentFallback icon={Volume2} title={label} description={mediaUrl || 'Media URL unavailable'} isOwn={isOwn} />;
+    return (
+      <AttachmentFallback
+        icon={Volume2}
+        title={label}
+        description={mediaUrl || 'Media URL unavailable'}
+        isOwn={isOwn}
+        className={STANDARD_MEDIA_CARD_CLASS}
+      />
+    );
   }
 
   return (
-    <div className={getPanelClass(isOwn)}>
+    <div className={cn(getPanelClass(isOwn), STANDARD_MEDIA_CARD_CLASS)}>
       <div className="mb-2 flex items-center gap-2 text-sm font-medium">
         <Volume2 className="h-4 w-4" />
         <span>{label}</span>
       </div>
       <audio controls preload="metadata" className="w-full min-w-[220px]" src={mediaUrl} />
     </div>
+  );
+}
+
+function DocumentOpenButton({
+  mediaUrl,
+  isOwn,
+  onError,
+}: {
+  mediaUrl: string;
+  isOwn: boolean;
+  onError: (message: string | null) => void;
+}) {
+  const [isOpening, setIsOpening] = useState(false);
+
+  const handleOpen = async () => {
+    if (isOpening) return;
+
+    onError(null);
+
+    const popup = window.open('', '_blank');
+    if (popup) {
+      popup.opener = null;
+      popup.document.title = 'Opening document';
+      popup.document.body.innerHTML =
+        '<div style="font-family: sans-serif; padding: 16px; color: #444;">Opening document...</div>';
+    }
+
+    try {
+      setIsOpening(true);
+
+      const response = await fetch(mediaUrl, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Media request failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      if (popup) {
+        popup.location.href = blobUrl;
+      } else {
+        window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      }
+
+      window.setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, 60_000);
+    } catch (error) {
+      if (popup) {
+        popup.close();
+      }
+
+      console.error('Unable to open document blob', error);
+      onError('Unable to open document right now');
+    } finally {
+      setIsOpening(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void handleOpen();
+      }}
+      disabled={isOpening}
+      className={cn(
+        'inline-flex items-center gap-1 text-xs font-medium transition-opacity',
+        isOpening && 'cursor-wait opacity-70',
+        isOwn ? 'text-primary-foreground/90' : 'text-primary'
+      )}
+    >
+      <ExternalLink className="h-3 w-3" />
+      <span>{isOpening ? 'Opening...' : 'Open'}</span>
+    </button>
   );
 }
 
@@ -288,10 +389,11 @@ function DocumentContent({
   isOwn: boolean;
 }) {
   const canOpen = isRenderableMediaUrl(mediaUrl);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   return (
     <div className="space-y-2">
-      <div className={getPanelClass(isOwn)}>
+      <div className={cn(getPanelClass(isOwn), STANDARD_MEDIA_CARD_CLASS)}>
         <div className="flex items-start gap-3">
           <div className="rounded-md bg-black/10 p-2">
             <FileText className="h-4 w-4" />
@@ -300,21 +402,9 @@ function DocumentContent({
             <p className="text-sm font-medium break-words">{filename || 'Document'}</p>
             {mimeType && <p className={cn('mt-1 text-xs', getMutedTextClass(isOwn))}>{mimeType}</p>}
           </div>
-          {canOpen && (
-            <a
-              href={mediaUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                'inline-flex items-center gap-1 text-xs font-medium',
-                isOwn ? 'text-primary-foreground/90' : 'text-primary'
-              )}
-            >
-              <ExternalLink className="h-3 w-3" />
-              <span>Open</span>
-            </a>
-          )}
+          {canOpen && <DocumentOpenButton mediaUrl={mediaUrl} isOwn={isOwn} onError={setOpenError} />}
         </div>
+        {openError && <p className={cn('mt-2 text-xs', getMutedTextClass(isOwn))}>{openError}</p>}
       </div>
       {caption && <RichText text={caption} className="text-inherit" />}
     </div>
@@ -637,11 +727,18 @@ export function MessageBubbleContent({ message, isOwn }: MessageBubbleContentPro
           title={resolved.mediaFilename || 'Attachment'}
           description={resolved.mediaMimeType || resolved.mediaUrl}
           isOwn={isOwn}
+          className={STANDARD_MEDIA_CARD_CLASS}
         />
       ) : isMeaningfulText(resolved.content) ? (
         <RichText text={resolved.content} className="text-inherit" />
       ) : (
-        <AttachmentFallback icon={FileText} title="Message" description="Unsupported message payload" isOwn={isOwn} />
+        <AttachmentFallback
+          icon={FileText}
+          title="Message"
+          description="Unsupported message payload"
+          isOwn={isOwn}
+          className={STANDARD_MEDIA_CARD_CLASS}
+        />
       );
 
     case 'text':
@@ -649,7 +746,13 @@ export function MessageBubbleContent({ message, isOwn }: MessageBubbleContentPro
       return isMeaningfulText(resolved.content) ? (
         <RichText text={resolved.content} className="text-inherit" />
       ) : (
-        <AttachmentFallback icon={FileText} title="Message" description="No renderable text content" isOwn={isOwn} />
+        <AttachmentFallback
+          icon={FileText}
+          title="Message"
+          description="No renderable text content"
+          isOwn={isOwn}
+          className={STANDARD_MEDIA_CARD_CLASS}
+        />
       );
   }
 }
