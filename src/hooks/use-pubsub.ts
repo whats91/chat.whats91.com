@@ -50,6 +50,7 @@ export function usePubSub({
       debugPubSub('usePubSub received payload from client', {
         userId,
         payloadType: payload.type,
+        payload,
       });
       messageHandlerRef.current?.(payload);
     };

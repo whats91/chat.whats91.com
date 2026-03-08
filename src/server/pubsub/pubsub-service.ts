@@ -48,12 +48,21 @@ function normalizePubSubServiceUrl(value: string | undefined): string | null {
 }
 
 function getExternalPubSubServiceUrl(): string | null {
-  return normalizePubSubServiceUrl(
+  const resolvedUrl = normalizePubSubServiceUrl(
     process.env.PUBSUB_SERVICE_URL ||
       process.env.PUBSUB_URL ||
       process.env.NEXT_PUBLIC_PUBSUB_URL ||
       DEFAULT_EXTERNAL_PUBSUB_SERVICE_URL
   );
+
+  log.info('Resolved external pubsub service URL', {
+    configuredPubSubServiceUrl: process.env.PUBSUB_SERVICE_URL || null,
+    configuredPubSubUrl: process.env.PUBSUB_URL || null,
+    configuredPublicPubSubUrl: process.env.NEXT_PUBLIC_PUBSUB_URL || null,
+    resolvedUrl,
+  });
+
+  return resolvedUrl;
 }
 
 // Callback type
@@ -76,6 +85,12 @@ export async function publishToUser(
   const channel = getChannelName(userId);
 
   try {
+    log.info('Attempting local pubsub publish', {
+      channel,
+      userId: String(userId),
+      eventType: event.type,
+      event,
+    });
     const redis = await getRedisClient();
     await redis.publish(channel, JSON.stringify(event));
 
@@ -90,10 +105,22 @@ export async function publishToUser(
 
   const externalPubSubUrl = getExternalPubSubServiceUrl();
   if (!externalPubSubUrl) {
+    log.warn('Skipping external pubsub publish because no service URL is configured', {
+      channel,
+      userId: String(userId),
+      eventType: event.type,
+    });
     return;
   }
 
   try {
+    log.info('Attempting external pubsub publish', {
+      channel,
+      userId: String(userId),
+      eventType: event.type,
+      url: externalPubSubUrl,
+      event,
+    });
     const response = await fetch(
       `${externalPubSubUrl}/api/publish/${encodeURIComponent(channel)}`,
       {
@@ -110,8 +137,8 @@ export async function publishToUser(
       }
     );
 
+    const responseText = await response.text();
     if (!response.ok) {
-      const responseText = await response.text();
       throw new Error(
         `HTTP ${response.status} ${response.statusText}: ${responseText}`
       );
@@ -122,6 +149,8 @@ export async function publishToUser(
       channel,
       userId: String(userId),
       url: externalPubSubUrl,
+      responseStatus: response.status,
+      responseText,
     });
   } catch (error) {
     log.error('External pubsub publish error', {
@@ -145,6 +174,7 @@ export async function subscribeToUser(
   log.info('Preparing subscription', {
     channel,
     userId: String(userId),
+    note: 'This subscription is only used by the local in-process pubsub path.',
   });
   const redisHandler = (message: string) => {
     try {

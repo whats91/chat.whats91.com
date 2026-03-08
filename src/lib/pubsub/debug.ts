@@ -7,10 +7,16 @@ export function isPubSubDebugEnabled(): boolean {
     return false;
   }
 
-  return (
-    process.env.NEXT_PUBLIC_DEBUG_PUBSUB === '1' ||
-    window.localStorage.getItem(DEBUG_STORAGE_KEY) === '1'
-  );
+  const explicitToggle = window.localStorage.getItem(DEBUG_STORAGE_KEY);
+  if (explicitToggle === '0') {
+    return false;
+  }
+
+  if (explicitToggle === '1') {
+    return true;
+  }
+
+  return true;
 }
 
 export function debugPubSub(message: string, meta?: Record<string, unknown>): void {

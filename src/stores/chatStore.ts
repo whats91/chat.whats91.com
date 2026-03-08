@@ -799,6 +799,7 @@ export const useChatStore = create<ChatState>()(
           messageId: message.id,
           whatsappMessageId: message.whatsappMessageId,
           direction: message.direction,
+          message,
         });
         
         set((state) => {
@@ -887,6 +888,8 @@ export const useChatStore = create<ChatState>()(
             totalMessagesInConversation: newMap.get(conversationKey)?.length || 0,
             selectedConversationId: state.selectedConversationId,
             conversationExists: Boolean(existingConversation),
+            latestMessage:
+              newMap.get(conversationKey)?.[newMap.get(conversationKey)!.length - 1] || null,
           });
 
           return {
@@ -904,6 +907,7 @@ export const useChatStore = create<ChatState>()(
           conversationId: conversationKey,
           messageId,
           status,
+          data,
         });
         
         set((state) => {
@@ -918,6 +922,7 @@ export const useChatStore = create<ChatState>()(
           debugPubSub('Store updated after status update', {
             conversationId: conversationKey,
             messageCount: updatedMessages.length,
+            updatedMessages,
           });
           return { messagesByConversation: newMap };
         });

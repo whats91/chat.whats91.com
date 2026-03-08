@@ -81,6 +81,7 @@ export function AppShell() {
     (payload: PubSubClientPayload) => {
       debugPubSub('AppShell received payload', {
         payloadType: payload.type,
+        payload,
       });
 
       if (payload.type === 'new_message') {
@@ -89,6 +90,7 @@ export function AppShell() {
           conversationId: event.data.conversation.id,
           messageId: event.data.messageRecord.id,
           whatsappMessageId: event.data.messageRecord.whatsappMessageId,
+          event,
         });
         handleNewMessage({
           conversationId: event.data.conversation.id,
@@ -103,6 +105,7 @@ export function AppShell() {
           conversationId: event.data.conversationId,
           messageId: event.data.messageId,
           status: event.data.status,
+          event,
         });
         handleStatusUpdate({
           messageId: event.data.messageId,
