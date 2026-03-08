@@ -902,9 +902,8 @@ export const useChatStore = create<ChatState>()(
       // Handle status update from socket
       handleStatusUpdate: (data) => {
         const { messageId, status, conversationId } = data;
-        const conversationKey = String(conversationId);
         debugPubSub('Store handling status update', {
-          conversationId: conversationKey,
+          conversationId: String(conversationId),
           messageId,
           status,
           data,
@@ -912,15 +911,37 @@ export const useChatStore = create<ChatState>()(
         
         set((state) => {
           const newMap = new Map(state.messagesByConversation);
-          const messages = newMap.get(conversationKey) || [];
-          const updatedMessages = messages.map(m => 
-            m.whatsappMessageId === messageId 
+          let resolvedConversationId: string | null =
+            conversationId && conversationId !== '0'
+              ? String(conversationId)
+              : null;
+
+          if (!resolvedConversationId) {
+            for (const [candidateConversationId, messages] of newMap.entries()) {
+              if (messages.some((message) => message.whatsappMessageId === messageId)) {
+                resolvedConversationId = candidateConversationId;
+                break;
+              }
+            }
+          }
+
+          if (!resolvedConversationId) {
+            debugPubSub('Store could not resolve conversation for status update', {
+              messageId,
+              status,
+            });
+            return { messagesByConversation: newMap };
+          }
+
+          const messages = newMap.get(resolvedConversationId) || [];
+          const updatedMessages = messages.map((m) =>
+            m.whatsappMessageId === messageId
               ? { ...m, status: status as Message['status'] }
               : m
           );
-          newMap.set(conversationKey, updatedMessages);
+          newMap.set(resolvedConversationId, updatedMessages);
           debugPubSub('Store updated after status update', {
-            conversationId: conversationKey,
+            conversationId: resolvedConversationId,
             messageCount: updatedMessages.length,
             updatedMessages,
           });

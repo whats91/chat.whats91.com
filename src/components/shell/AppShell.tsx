@@ -3,6 +3,8 @@
 import { useEffect, useCallback } from 'react';
 import type { Message } from '@/lib/types/chat';
 import type {
+  LegacyPubSubMessagePayload,
+  LegacyPubSubStatusPayload,
   PubSubClientPayload,
   PubSubNewMessageEvent,
   PubSubStatusUpdateEvent,
@@ -33,6 +35,52 @@ const SHORTCUTS = {
   deleteChat: { key: 'Backspace', ctrl: true, shift: false, description: 'Delete chat' },
 };
 
+function ensureHttps(url: string | null | undefined): string | null {
+  if (!url) {
+    return null;
+  }
+
+  return url.replace(/^http:\/\//i, 'https://');
+}
+
+function normalizePayloadObject(
+  value: Record<string, unknown> | string | null | undefined
+): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return value;
+}
+
+function isLegacyStatusPayload(
+  payload: PubSubClientPayload
+): payload is LegacyPubSubStatusPayload {
+  return payload.type === 'status' && typeof payload.messageId === 'string';
+}
+
+function isLegacyMessagePayload(
+  payload: PubSubClientPayload
+): payload is LegacyPubSubMessagePayload {
+  return Boolean(
+    payload &&
+      typeof payload === 'object' &&
+      'conversation' in payload &&
+      'messageRecord' in payload &&
+      payload.conversation &&
+      payload.messageRecord
+  );
+}
+
 function mapPubSubMessageToChatMessage(event: PubSubNewMessageEvent): Message {
   const userId = getCurrentUserId();
   const { conversation, messageRecord } = event.data;
@@ -59,6 +107,80 @@ function mapPubSubMessageToChatMessage(event: PubSubNewMessageEvent): Message {
     isRead: messageRecord.direction === 'outbound',
     isPinned: Boolean(messageRecord.isPinned),
     isStarred: Boolean(messageRecord.isStarred),
+  };
+}
+
+function mapLegacyPubSubPayloadToChatMessage(
+  payload: LegacyPubSubMessagePayload
+): Message | null {
+  const conversationId = payload.conversation?.id;
+  const messageId = payload.messageRecord?.id;
+
+  if (conversationId === undefined || messageId === undefined) {
+    return null;
+  }
+
+  const userId = getCurrentUserId();
+  const direction = payload.direction === 'outbound' ? 'outbound' : 'inbound';
+  const media = payload.content?.media;
+  const messageType = (payload.messageRecord?.messageType ||
+    payload.type ||
+    payload.content?.type ||
+    'text') as Message['type'];
+  const incomingPayload =
+    normalizePayloadObject(payload.messageRecord?.incomingPayload) ||
+    (direction === 'inbound' ? normalizePayloadObject(payload.webhook) : null);
+  const outgoingPayload =
+    normalizePayloadObject(payload.messageRecord?.outgoingPayload) ||
+    (direction === 'outbound'
+      ? normalizePayloadObject(payload.content?.payload)
+      : null);
+
+  return {
+    id: String(messageId),
+    conversationId: String(conversationId),
+    whatsappMessageId:
+      payload.messageId || String(payload.messageRecord?.id || messageId),
+    senderId:
+      direction === 'inbound'
+        ? String(payload.contactPhone || payload.from || '')
+        : userId,
+    fromPhone:
+      direction === 'inbound'
+        ? String(payload.from || payload.contactPhone || '')
+        : userId,
+    toPhone:
+      direction === 'outbound'
+        ? String(payload.to || payload.businessPhoneNumber || '')
+        : userId,
+    direction,
+    type: messageType,
+    content:
+      payload.messageRecord?.messageContent ??
+      payload.content?.text ??
+      media?.caption ??
+      null,
+    status: (payload.status ||
+      (direction === 'outbound' ? 'sent' : 'delivered')) as Message['status'],
+    timestamp: new Date(
+      payload.messageRecord?.timestamp ||
+        payload.processedAt ||
+        new Date().toISOString()
+    ),
+    mediaUrl: ensureHttps(media?.url || null),
+    mediaMimeType: media?.mimeType || null,
+    mediaFilename: media?.filename || null,
+    mediaCaption: media?.caption || null,
+    interactiveData: payload.content?.interactive || null,
+    locationData: (payload.content?.location || null) as Message['locationData'],
+    contactData: (payload.content?.contacts || null) as Message['contactData'],
+    incomingPayload,
+    outgoingPayload,
+    webhookData: normalizePayloadObject(payload.webhook),
+    errorMessage: null,
+    isRead: direction === 'outbound',
+    isPinned: false,
+    isStarred: false,
   };
 }
 
@@ -112,7 +234,49 @@ export function AppShell() {
           status: event.data.status,
           conversationId: event.data.conversationId,
         });
+        return;
       }
+
+      if (isLegacyStatusPayload(payload)) {
+        debugPubSub('AppShell forwarding legacy status payload to store', {
+          payload,
+        });
+        handleStatusUpdate({
+          messageId: payload.messageId,
+          status: payload.status,
+          conversationId:
+            payload.conversationId ||
+            useChatStore.getState().selectedConversationId ||
+            '0',
+        });
+        return;
+      }
+
+      if (isLegacyMessagePayload(payload)) {
+        const legacyMessage = mapLegacyPubSubPayloadToChatMessage(payload);
+        if (!legacyMessage) {
+          debugPubSub('Legacy pubsub payload could not be normalized', {
+            payload,
+          });
+          return;
+        }
+
+        debugPubSub('AppShell forwarding legacy message payload to store', {
+          conversationId: legacyMessage.conversationId,
+          messageId: legacyMessage.id,
+          whatsappMessageId: legacyMessage.whatsappMessageId,
+          payload,
+        });
+        handleNewMessage({
+          conversationId: legacyMessage.conversationId,
+          message: legacyMessage,
+        });
+        return;
+      }
+
+      debugPubSub('AppShell ignored unsupported pubsub payload', {
+        payload,
+      });
     },
     [handleNewMessage, handleStatusUpdate]
   );

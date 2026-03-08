@@ -54,10 +54,62 @@ export interface PubSubConversationUpdateEvent extends PubSubEvent {
   };
 }
 
+export interface LegacyPubSubStatusPayload {
+  type: 'status';
+  messageId: string;
+  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | string;
+  conversationId?: number | string;
+}
+
+export interface LegacyPubSubMessagePayload {
+  type: string;
+  messageId?: string;
+  from?: string;
+  to?: string;
+  direction?: 'inbound' | 'outbound';
+  status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | string;
+  contactName?: string;
+  contactPhone?: string;
+  businessPhoneNumber?: string;
+  conversation?: {
+    id?: number | string;
+    unreadCount?: number;
+    totalMessages?: number;
+    lastMessageAt?: string;
+  } | null;
+  messageRecord?: {
+    id?: number | string;
+    messageContent?: string | null;
+    messageType?: string | null;
+    timestamp?: string;
+    outgoingPayload?: Record<string, unknown> | string | null;
+    incomingPayload?: Record<string, unknown> | string | null;
+  } | null;
+  content?: {
+    type?: string;
+    text?: string | null;
+    payload?: Record<string, unknown> | string | null;
+    media?: {
+      url?: string | null;
+      mimeType?: string | null;
+      filename?: string | null;
+      caption?: string | null;
+    } | null;
+    interactive?: Record<string, unknown> | null;
+    location?: Record<string, unknown> | null;
+    contacts?: Record<string, unknown>[] | null;
+  } | null;
+  webhook?: Record<string, unknown> | string | null;
+  source?: string;
+  processedAt?: string;
+}
+
 export type PubSubClientPayload =
   | PubSubNewMessageEvent
   | PubSubStatusUpdateEvent
-  | PubSubConversationUpdateEvent;
+  | PubSubConversationUpdateEvent
+  | LegacyPubSubStatusPayload
+  | LegacyPubSubMessagePayload;
 
 export type PubSubTransportEnvelope =
   | {
