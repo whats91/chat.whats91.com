@@ -69,6 +69,8 @@ interface ConversationViewProps {
   showBackButton?: boolean;
 }
 
+const EMPTY_MESSAGES: Message[] = [];
+
 function getSearchableMessageText(message: Message): string {
   const resolved = resolveMessageForRendering(message);
   const contactText = (resolved.contactData || [])
@@ -155,9 +157,7 @@ export function ConversationView({
   const conversation = useChatStore((state) =>
     state.conversations.find((item) => item.id === conversationId) || null
   );
-  const liveMessages = useChatStore(
-    (state) => state.messagesByConversation.get(conversationId) || []
-  );
+  const liveMessages = useChatStore((state) => state.messagesByConversation.get(conversationId));
   const conversationRootRef = useRef<HTMLDivElement | null>(null);
   const [viewerMessage, setViewerMessage] = useState<Message | null>(null);
   const [isForwardPickerOpen, setIsForwardPickerOpen] = useState(false);
@@ -169,7 +169,13 @@ export function ConversationView({
   const [remotePinnedMessage, setRemotePinnedMessage] = useState<Message | null>(null);
   
   const messages = useMemo(
-    () => [...liveMessages].sort(compareMessageTimeline),
+    () => {
+      if (!liveMessages || liveMessages.length === 0) {
+        return EMPTY_MESSAGES;
+      }
+
+      return [...liveMessages].sort(compareMessageTimeline);
+    },
     [liveMessages]
   );
   const currentUserId = getCurrentUserId();
