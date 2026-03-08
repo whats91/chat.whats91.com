@@ -22,6 +22,7 @@ import {
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
+import { debugPubSub } from '@/lib/pubsub/debug';
 import { formatDateHeaderInIst, formatTimeInIst, getIstDateKey } from '@/lib/time/ist';
 import {
   DropdownMenu,
@@ -142,19 +143,21 @@ export function ConversationView({
   onBack,
   showBackButton = false,
 }: ConversationViewProps) {
-  const {
-    conversations,
-    archiveConversation,
-    blockConversation,
-    getMessages,
-    muteConversation,
-    pinConversation,
-    sendMessage,
-    loadConversations,
-    loadMessages,
-    toggleRightPanel,
-    isRightPanelOpen,
-  } = useChatStore();
+  const archiveConversation = useChatStore((state) => state.archiveConversation);
+  const blockConversation = useChatStore((state) => state.blockConversation);
+  const muteConversation = useChatStore((state) => state.muteConversation);
+  const pinConversation = useChatStore((state) => state.pinConversation);
+  const sendMessage = useChatStore((state) => state.sendMessage);
+  const loadConversations = useChatStore((state) => state.loadConversations);
+  const loadMessages = useChatStore((state) => state.loadMessages);
+  const toggleRightPanel = useChatStore((state) => state.toggleRightPanel);
+  const isRightPanelOpen = useChatStore((state) => state.isRightPanelOpen);
+  const conversation = useChatStore((state) =>
+    state.conversations.find((item) => item.id === conversationId) || null
+  );
+  const liveMessages = useChatStore(
+    (state) => state.messagesByConversation.get(conversationId) || []
+  );
   const conversationRootRef = useRef<HTMLDivElement | null>(null);
   const [viewerMessage, setViewerMessage] = useState<Message | null>(null);
   const [isForwardPickerOpen, setIsForwardPickerOpen] = useState(false);
@@ -165,8 +168,10 @@ export function ConversationView({
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [remotePinnedMessage, setRemotePinnedMessage] = useState<Message | null>(null);
   
-  const conversation = conversations.find(c => c.id === conversationId);
-  const messages = [...getMessages(conversationId)].sort(compareMessageTimeline);
+  const messages = useMemo(
+    () => [...liveMessages].sort(compareMessageTimeline),
+    [liveMessages]
+  );
   const currentUserId = getCurrentUserId();
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const searchMatches = useMemo(
@@ -189,6 +194,14 @@ export function ConversationView({
   const isPinnedMessageLoaded = Boolean(
     pinnedMessage && messages.some((message) => message.id === pinnedMessage.id)
   );
+
+  useEffect(() => {
+    debugPubSub('ConversationView live messages changed', {
+      conversationId,
+      totalMessages: messages.length,
+      latestMessage: messages[messages.length - 1] || null,
+    });
+  }, [conversationId, messages]);
 
   useEffect(() => {
     if (!isSearchOpen) {
