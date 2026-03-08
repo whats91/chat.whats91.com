@@ -147,7 +147,6 @@ export function ChatList({ className }: ChatListProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem>New group</DropdownMenuItem>
                 <DropdownMenuItem>Starred messages</DropdownMenuItem>
                 <DropdownMenuItem>Settings</DropdownMenuItem>
                 <DropdownMenuSeparator />

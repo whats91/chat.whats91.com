@@ -1,6 +1,6 @@
 // Mock data for development - simulates WhatsApp-like conversations
 
-import type { User, Message, Conversation, WhatsAppTemplate, Tenant } from './chat';
+import type { User, Message, Conversation, WhatsAppTemplate, Tenant } from '@/lib/types/chat';
 
 // Mock users
 export const mockUsers: User[] = [
@@ -53,7 +53,7 @@ export const mockUsers: User[] = [
   },
   {
     id: 'user-7',
-    name: 'Marketing Group',
+    name: 'Marketing Desk',
     phone: '+1 555-0300',
     status: 'offline',
     avatar: undefined,

@@ -397,10 +397,19 @@ export const useChatStore = create<ChatState>()(
       },
       
       selectConversation: async (id) => {
-        set({ selectedConversationId: id });
+        const prevId = get().selectedConversationId;
+
+        if (prevId === id) {
+          if (id !== null) {
+            get().loadMessages(id);
+            get().markAsRead(id);
+          }
+          return;
+        }
+
+        set({ selectedConversationId: id, isRightPanelOpen: false });
         
         // Unsubscribe from previous conversation
-        const prevId = get().selectedConversationId;
         if (prevId !== null) {
           try {
             const { unsubscribeFromConversation } = await import('@/lib/socket/client');
@@ -790,8 +799,12 @@ export const useChatStore = create<ChatState>()(
       name: 'whats91-chat-store',
       partialize: (state) => ({
         selectedConversationId: state.selectedConversationId,
-        isRightPanelOpen: state.isRightPanelOpen,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.selectedConversationId) {
+          void state.selectConversation(state.selectedConversationId);
+        }
+      },
     }
   )
 );

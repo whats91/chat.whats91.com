@@ -3,11 +3,8 @@
 import { useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { StarredMessagesDialog } from '@/components/chat/StarredMessagesDialog';
-import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -17,30 +14,23 @@ import {
   Star,
   Bell,
   BellOff,
-  Pin,
-  Archive,
   Ban,
   Trash2,
   Eraser,
   Flag,
   Search,
   ChevronDown,
-  User,
-  Users,
   Tag,
-  FileText,
   Image as ImageIcon,
-  Link2,
 } from 'lucide-react';
 import type { Conversation } from '@/lib/types/chat';
 
 interface RightInfoPanelProps {
   conversationId: string;
-  onClose?: () => void;
 }
 
-export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps) {
-  const { conversations, labels, muteConversation, toggleRightPanel } = useChatStore();
+export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
+  const { conversations, labels, muteConversation } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
@@ -64,8 +54,8 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
     .slice(0, 2);
   
   return (
-    <div className="w-80 border-l bg-background flex flex-col h-full">
-      <ScrollArea className="flex-1">
+    <div className="flex h-full min-h-0 w-80 flex-col overflow-hidden border-l bg-background">
+      <ScrollArea className="min-h-0 flex-1">
         {/* Header */}
         <div className="p-6 text-center">
           <Avatar className="h-24 w-24 mx-auto mb-4">
@@ -172,7 +162,6 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
         
         {/* Quick Links */}
         <div className="p-4 space-y-3">
-          <QuickLink icon={Users} label="Groups in common" count={2} />
           <QuickLink icon={Tag} label="Labels" />
         </div>
         

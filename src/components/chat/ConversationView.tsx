@@ -561,7 +561,15 @@ function ConversationHeader({
         </AvatarFallback>
       </Avatar>
       
-      <div className="flex-1 min-w-0">
+      <button
+        type="button"
+        className="flex-1 min-w-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/50"
+        onClick={() => {
+          if (!isInfoOpen) {
+            onInfoClick();
+          }
+        }}
+      >
         <div className="font-medium truncate">{participantName}</div>
         <div className="text-xs text-muted-foreground">
           {typing?.isTyping ? (
@@ -574,7 +582,7 @@ function ConversationHeader({
             participantPhone
           )}
         </div>
-      </div>
+      </button>
       
       <div className="flex items-center gap-1">
         <TooltipProvider>
