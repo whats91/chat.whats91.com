@@ -21,13 +21,15 @@ import type {
   MessageDirection,
   MessageStatus,
   MessageType,
-  SendMessageRequest 
+  SendMessageRequest,
+  WhatsAppMessagePayload,
 } from '@/lib/types/chat';
 import { 
   sendMessageToMeta, 
   normalizeConversationPhone, 
   mapConversationMessageStatus 
 } from '../whatsapp/message-sender';
+import { uploadMediaToMeta } from '../whatsapp/media-upload';
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
 import { findCloudApiSetupByUserAndPhoneNumberId, findDefaultCloudApiSetupByUser } from '../db/cloud-api-setup';
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
@@ -38,8 +40,10 @@ import {
   resolveForwardableConversationMedia,
   finalizePendingConversationMediaUpload,
   resolvePendingConversationMediaUpload,
+  uploadConversationMedia,
 } from '@/server/media/conversation-media-service';
 import { Logger } from '@/lib/logger';
+import { prepareVoiceNoteAudio, type VoiceNoteRecordingMode } from '@/server/media/voice-note-audio';
 
 const log = new Logger('ConversationCtrl');
 
@@ -119,6 +123,93 @@ function isMediaMessageType(value: string | null | undefined): boolean {
 
 function isConversationBlocked(value: unknown): boolean {
   return Boolean(value);
+}
+
+interface ResolvedConversationSendContext {
+  conversation: any;
+  resolvedPhoneNumberId: string;
+  accessToken: string;
+}
+
+async function resolveConversationSendContext(
+  conversationId: number,
+  userId: string
+): Promise<
+  | { success: true; data: ResolvedConversationSendContext }
+  | { success: false; message: string }
+> {
+  const [conversation] = await queryConversationsDb<any>(
+    `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
+    [conversationId, userId]
+  );
+
+  if (!conversation) {
+    return {
+      success: false,
+      message: 'Conversation not found',
+    };
+  }
+
+  if (isConversationBlocked(conversation.is_blocked)) {
+    return {
+      success: false,
+      message: 'This contact is blocked. Unblock the contact to send messages.',
+    };
+  }
+
+  let resolvedPhoneNumberId = conversation.whatsapp_phone_number_id
+    ? String(conversation.whatsapp_phone_number_id)
+    : null;
+  let cloudSetup = resolvedPhoneNumberId
+    ? await findCloudApiSetupByUserAndPhoneNumberId(userId, resolvedPhoneNumberId)
+    : null;
+
+  const envAccessToken = process.env.WHATSAPP_ACCESS_TOKEN || null;
+  const envPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || null;
+
+  if (!cloudSetup?.whatsappAccessToken) {
+    const fallbackSetup = await findDefaultCloudApiSetupByUser(userId);
+
+    if (fallbackSetup?.phoneNumberId && fallbackSetup.whatsappAccessToken) {
+      cloudSetup = fallbackSetup;
+      resolvedPhoneNumberId = fallbackSetup.phoneNumberId;
+
+      if (String(conversation.whatsapp_phone_number_id || '') !== fallbackSetup.phoneNumberId) {
+        await executeConversationsDb(
+          `UPDATE conversations
+           SET whatsapp_phone_number_id = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND user_id = ?`,
+          [fallbackSetup.phoneNumberId, conversationId, userId]
+        );
+        conversation.whatsapp_phone_number_id = fallbackSetup.phoneNumberId;
+      }
+    }
+  }
+
+  const accessToken = cloudSetup?.whatsappAccessToken || envAccessToken;
+  if (!resolvedPhoneNumberId && envPhoneNumberId) {
+    resolvedPhoneNumberId = envPhoneNumberId;
+  }
+
+  if (!conversation.whatsapp_phone_number_id && resolvedPhoneNumberId) {
+    conversation.whatsapp_phone_number_id = resolvedPhoneNumberId;
+  }
+
+  if (!accessToken || !resolvedPhoneNumberId) {
+    return {
+      success: false,
+      message: 'WhatsApp configuration not found for this phone number',
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      conversation,
+      resolvedPhoneNumberId,
+      accessToken,
+    },
+  };
 }
 
 function mapConversationMessageRowToMessage(msg: any): Message {
@@ -1000,7 +1091,7 @@ export async function sendMessage({
       [
         conversationId,
         sendResult.messageId,
-        conversation.whatsapp_phone_number_id,
+        resolvedPhoneNumberId,
         conversation.contact_phone,
         'outbound',
         messageData.messageType,
@@ -1132,6 +1223,281 @@ export async function sendMessage({
     return {
       success: false,
       message: 'Failed to send message',
+      data: null,
+    };
+  }
+}
+
+export async function sendVoiceNote(params: {
+  conversationId: number;
+  userId: string;
+  fileBuffer: Buffer;
+  mimeType: string;
+  originalFilename: string;
+  fileSize: number;
+  recordingMode: VoiceNoteRecordingMode;
+}) {
+  const { conversationId, userId, fileBuffer, mimeType, originalFilename, recordingMode } = params;
+
+  let pendingUploadToken: string | null = null;
+  let acceptedWhatsappMessageId: string | null = null;
+
+  try {
+    const sendContext = await resolveConversationSendContext(conversationId, userId);
+    if (!sendContext.success) {
+      return {
+        success: false,
+        message: sendContext.message,
+        data: null,
+      };
+    }
+
+    const { conversation, resolvedPhoneNumberId, accessToken } = sendContext.data;
+    const preparedAudio = await prepareVoiceNoteAudio({
+      fileBuffer,
+      mimeType,
+      originalFilename,
+      recordingMode,
+    });
+
+    if (!preparedAudio.success || !preparedAudio.fileBuffer || !preparedAudio.mimeType || !preparedAudio.originalFilename) {
+      return {
+        success: false,
+        message: preparedAudio.message,
+        data: null,
+      };
+    }
+
+    const uploadToWasabi = await uploadConversationMedia({
+      userId,
+      conversationId,
+      fileBuffer: preparedAudio.fileBuffer,
+      mimeType: preparedAudio.mimeType,
+      originalFilename: preparedAudio.originalFilename,
+      fileSize: preparedAudio.fileBuffer.length,
+    });
+
+    const uploadEntry = uploadToWasabi.data?.[0];
+    if (!uploadToWasabi.success || !uploadEntry?.uploadToken) {
+      return {
+        success: false,
+        message: uploadToWasabi.message || 'Failed to store voice note in Wasabi',
+        data: null,
+      };
+    }
+
+    pendingUploadToken = uploadEntry.uploadToken;
+
+    const metaMediaUpload = await uploadMediaToMeta({
+      accessToken,
+      phoneNumberId: resolvedPhoneNumberId,
+      fileBuffer: preparedAudio.fileBuffer,
+      fileName: preparedAudio.originalFilename,
+      mimeType: preparedAudio.mimeType,
+    });
+
+    if (!metaMediaUpload.success || !metaMediaUpload.mediaId) {
+      if (pendingUploadToken) {
+        await cleanupPendingConversationMediaUpload({
+          userId,
+          uploadToken: pendingUploadToken,
+        });
+      }
+
+      return {
+        success: false,
+        message: metaMediaUpload.message,
+        data: null,
+      };
+    }
+
+    const messagePayload: WhatsAppMessagePayload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: conversation.contact_phone,
+      type: 'audio',
+      audio: {
+        id: metaMediaUpload.mediaId,
+        voice: true,
+      },
+    };
+
+    const sendResult = await sendMessageToMeta({
+      messagePayload,
+      accessToken,
+      phoneNumberId: resolvedPhoneNumberId,
+      options: {
+        userId,
+        receiverId: conversation.contact_phone,
+      },
+    });
+
+    if (!sendResult.success || !sendResult.messageId) {
+      if (pendingUploadToken) {
+        await cleanupPendingConversationMediaUpload({
+          userId,
+          uploadToken: pendingUploadToken,
+        });
+      }
+
+      return {
+        success: false,
+        message: sendResult.error || 'Failed to send voice note',
+        data: { errorCode: sendResult.errorCode },
+      };
+    }
+
+    acceptedWhatsappMessageId = sendResult.messageId;
+    const messageTimestamp = new Date();
+
+    await executeConversationsDb(
+      `INSERT INTO conversation_messages 
+       (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
+        message_type, message_content, media_url, media_mime_type, media_filename, 
+        media_caption, status, timestamp, outgoing_payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      [
+        conversationId,
+        sendResult.messageId,
+        resolvedPhoneNumberId,
+        conversation.contact_phone,
+        'outbound',
+        'audio',
+        null,
+        null,
+        preparedAudio.mimeType,
+        preparedAudio.originalFilename,
+        null,
+        mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
+        messageTimestamp,
+        JSON.stringify(messagePayload),
+      ]
+    );
+
+    const [newMessage] = await queryConversationsDb<any>(
+      `SELECT * FROM conversation_messages WHERE whatsapp_message_id = ?`,
+      [sendResult.messageId]
+    );
+
+    if (!newMessage) {
+      if (pendingUploadToken) {
+        await cleanupPendingConversationMediaUpload({
+          userId,
+          uploadToken: pendingUploadToken,
+        });
+      }
+
+      return {
+        success: false,
+        message: 'Voice note was sent to Meta but could not be stored locally',
+        data: null,
+      };
+    }
+
+    let persistedMediaUrl = uploadEntry.proxyUrl;
+    if (pendingUploadToken && newMessage) {
+      const finalMediaUrl = buildConversationMediaProxyUrl(newMessage.id);
+
+      await finalizePendingConversationMediaUpload({
+        userId,
+        uploadToken: pendingUploadToken,
+        finalMessageId: String(newMessage.id),
+      });
+
+      await executeConversationsDb(
+        `UPDATE conversation_messages
+         SET media_url = ?, media_mime_type = ?, media_filename = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          finalMediaUrl,
+          preparedAudio.mimeType,
+          preparedAudio.originalFilename,
+          newMessage.id,
+        ]
+      );
+
+      newMessage.media_url = finalMediaUrl;
+      newMessage.media_mime_type = preparedAudio.mimeType;
+      newMessage.media_filename = preparedAudio.originalFilename;
+      persistedMediaUrl = finalMediaUrl;
+    }
+
+    await executeConversationsDb(
+      `UPDATE conversations SET 
+        last_message_id = ?,
+        last_message_content = ?,
+        last_message_type = ?,
+        last_message_at = ?,
+        last_message_direction = 'outbound',
+        total_messages = total_messages + 1,
+        updated_at = datetime('now')
+       WHERE id = ?`,
+      [
+        sendResult.messageId,
+        '[audio]',
+        'audio',
+        messageTimestamp,
+        conversationId,
+      ]
+    );
+
+    await publishNewMessage(
+      userId,
+      {
+        id: conversationId,
+        contactPhone: conversation.contact_phone,
+        contactName: conversation.contact_name,
+      },
+      {
+        id: newMessage.id,
+        whatsappMessageId: newMessage.whatsapp_message_id,
+        direction: 'outbound',
+        messageType: 'audio',
+        messageContent: null,
+        status: newMessage.status,
+        timestamp: messageTimestamp,
+        mediaUrl: persistedMediaUrl,
+        mediaMimeType: preparedAudio.mimeType,
+        mediaFilename: preparedAudio.originalFilename,
+        isPinned: Boolean(newMessage.is_pinned),
+        isStarred: Boolean(newMessage.is_starred),
+        outgoingPayload: messagePayload as unknown as Record<string, unknown>,
+      }
+    );
+
+    return {
+      success: true,
+      message: 'Voice note sent successfully',
+      data: {
+        message: {
+          id: String(newMessage.id),
+          whatsappMessageId: sendResult.messageId,
+          direction: 'outbound',
+          messageType: 'audio',
+          messageContent: null,
+          mediaUrl: persistedMediaUrl,
+          mediaMimeType: preparedAudio.mimeType,
+          mediaFilename: preparedAudio.originalFilename,
+          mediaCaption: null,
+          status: mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
+        },
+        whatsappMessageId: sendResult.messageId,
+        conversationLogged: true,
+      },
+    };
+  } catch (error) {
+    log.error('sendVoiceNote error', { error: error instanceof Error ? error.message : error });
+
+    if (pendingUploadToken && !acceptedWhatsappMessageId) {
+      await cleanupPendingConversationMediaUpload({
+        userId,
+        uploadToken: pendingUploadToken,
+      });
+    }
+
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to send voice note',
       data: null,
     };
   }
@@ -1729,6 +2095,7 @@ export const conversationController = {
   getStarredMessages,
   getConversationMediaMessages,
   sendMessage,
+  sendVoiceNote,
   markAsRead: markConversationAsRead,
   toggleArchive: toggleArchiveConversation,
   togglePin: togglePinConversation,

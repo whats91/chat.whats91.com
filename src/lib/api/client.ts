@@ -307,6 +307,28 @@ export async function uploadMedia(
   return response.json();
 }
 
+export async function sendVoiceNote(
+  conversationId: string | number,
+  file: File,
+  params: {
+    recordingMode: 'direct-ogg-opus' | 'server-convert';
+  }
+): Promise<SendMessageResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('recordingMode', params.recordingMode);
+
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/voice-note`, {
+    method: 'POST',
+    headers: {
+      'x-user-id': getUserId(),
+    },
+    body: formData,
+  });
+
+  return response.json();
+}
+
 // API client object for convenience
 export const api = {
   conversations: {
@@ -328,6 +350,7 @@ export const api = {
     clear: clearConversation,
     delete: deleteConversation,
     uploadMedia,
+    sendVoiceNote,
   },
 };
 

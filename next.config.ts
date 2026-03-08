@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
     "chat.whats91.com",
   ],
   // Transpile socket.io-client for proper bundling in client components
-  transpilePackages: ['socket.io-client'],
+  transpilePackages: ['socket.io-client', 'opus-media-recorder'],
 };
 
 export default nextConfig;

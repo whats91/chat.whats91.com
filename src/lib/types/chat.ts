@@ -462,7 +462,7 @@ export interface WhatsAppMessagePayload {
   text?: { body: string; preview_url?: boolean };
   image?: { id?: string; link?: string; caption?: string };
   video?: { id?: string; link?: string; caption?: string };
-  audio?: { id?: string; link?: string };
+  audio?: { id?: string; link?: string; voice?: boolean };
   document?: { id?: string; link?: string; caption?: string; filename?: string };
   location?: LocationData;
   contacts?: ContactData[];
