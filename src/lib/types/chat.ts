@@ -623,6 +623,7 @@ export interface SendMessageRequest {
   messageContent?: string;
   mediaUrl?: string;
   mediaUploadToken?: string;
+  isVoiceMessage?: boolean;
   forwardSourceMessageId?: string;
   mediaCaption?: string;
   replyToMessageId?: string;

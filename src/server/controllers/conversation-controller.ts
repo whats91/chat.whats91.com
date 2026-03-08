@@ -938,7 +938,10 @@ export async function sendMessage({
         };
         break;
       case 'audio':
-        messagePayload.audio = { link: mediaUrlForMeta };
+        messagePayload.audio = {
+          link: mediaUrlForMeta,
+          ...(messageData.isVoiceMessage ? { voice: true } : {}),
+        };
         break;
       case 'sticker':
         messagePayload.sticker = { link: mediaUrlForMeta };

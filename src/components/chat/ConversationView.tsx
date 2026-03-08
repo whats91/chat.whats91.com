@@ -1026,6 +1026,62 @@ const ATTACHMENT_FILE_ACCEPT = [
   'text/plain',
 ].join(',');
 
+const WHATSAPP_VOICE_RECORDING_FORMATS = [
+  {
+    mimeType: 'audio/ogg;codecs=opus',
+    normalizedMimeType: 'audio/ogg',
+    extension: 'ogg',
+    label: 'OGG (Opus)',
+  },
+  {
+    mimeType: 'audio/ogg',
+    normalizedMimeType: 'audio/ogg',
+    extension: 'ogg',
+    label: 'OGG',
+  },
+  {
+    mimeType: 'audio/mp4',
+    normalizedMimeType: 'audio/mp4',
+    extension: 'm4a',
+    label: 'M4A',
+  },
+  {
+    mimeType: 'audio/aac',
+    normalizedMimeType: 'audio/aac',
+    extension: 'aac',
+    label: 'AAC',
+  },
+  {
+    mimeType: 'audio/mpeg',
+    normalizedMimeType: 'audio/mpeg',
+    extension: 'mp3',
+    label: 'MP3',
+  },
+] as const;
+
+type VoiceRecordingFormat = (typeof WHATSAPP_VOICE_RECORDING_FORMATS)[number];
+
+function selectSupportedVoiceRecordingFormat(): VoiceRecordingFormat | null {
+  if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') {
+    return null;
+  }
+
+  for (const format of WHATSAPP_VOICE_RECORDING_FORMATS) {
+    if (MediaRecorder.isTypeSupported(format.mimeType)) {
+      return format;
+    }
+  }
+
+  return null;
+}
+
+function formatRecordingDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
 function inferMessageTypeFromFile(file: File): SendMessageRequest['messageType'] {
   const mimeType = file.type.toLowerCase();
   const filename = file.name.toLowerCase();
@@ -1050,10 +1106,17 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
   const { loadConversations, loadMessages } = useChatStore();
   const [message, setMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingDurationSeconds, setRecordingDurationSeconds] = useState(0);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingFormatRef = useRef<VoiceRecordingFormat | null>(null);
+  const shouldSendRecordingRef = useRef(true);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   const handleSend = () => {
     if (!isBlocked && message.trim()) {
@@ -1084,7 +1147,10 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
     });
   };
 
-  const handleFileSend = async (file: File) => {
+  const handleFileSend = async (
+    file: File,
+    options: { isVoiceMessage?: boolean } = {}
+  ) => {
     if (isBlocked) {
       return;
     }
@@ -1109,6 +1175,7 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
         messageContent,
         mediaCaption: messageType === 'audio' ? undefined : trimmedCaption,
         mediaUploadToken: uploadEntry.uploadToken,
+        isVoiceMessage: messageType === 'audio' && Boolean(options.isVoiceMessage),
       });
 
       if (!sendResponse.success) {
@@ -1129,6 +1196,206 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
     }
   };
 
+  const clearRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  const stopRecordingStream = () => {
+    if (mediaStreamRef.current) {
+      for (const track of mediaStreamRef.current.getTracks()) {
+        track.stop();
+      }
+
+      mediaStreamRef.current = null;
+    }
+  };
+
+  const resetRecordingState = () => {
+    clearRecordingTimer();
+    stopRecordingStream();
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+    recordingFormatRef.current = null;
+    shouldSendRecordingRef.current = true;
+    setIsRecording(false);
+    setRecordingDurationSeconds(0);
+  };
+
+  const finalizeRecording = async () => {
+    const shouldSend = shouldSendRecordingRef.current;
+    const format = recordingFormatRef.current;
+    const recordedChunks = [...recordedChunksRef.current];
+
+    resetRecordingState();
+
+    if (!shouldSend) {
+      return;
+    }
+
+    if (!format || recordedChunks.length === 0) {
+      toast({
+        title: 'Recording unavailable',
+        description: 'No audio was captured. Please try recording again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const recordedBlob = new Blob(recordedChunks, { type: format.normalizedMimeType });
+
+    if (!recordedBlob.size) {
+      toast({
+        title: 'Recording unavailable',
+        description: 'No audio was captured. Please try recording again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const recordedFile = new File(
+      [recordedBlob],
+      `voice-message-${Date.now()}.${format.extension}`,
+      { type: format.normalizedMimeType }
+    );
+
+    await handleFileSend(recordedFile, {
+      isVoiceMessage: format.mimeType.includes('codecs=opus'),
+    });
+  };
+
+  const discardRecording = () => {
+    shouldSendRecordingRef.current = false;
+    setIsRecording(false);
+    setRecordingDurationSeconds(0);
+    clearRecordingTimer();
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+      return;
+    }
+
+    resetRecordingState();
+  };
+
+  const startRecording = async () => {
+    if (isBlocked || isUploadingAttachment || isRecording) {
+      return;
+    }
+
+    if (
+      typeof window === 'undefined' ||
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      toast({
+        title: 'Voice messages unavailable',
+        description: 'This browser does not support microphone recording.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const format = selectSupportedVoiceRecordingFormat();
+    if (!format) {
+      toast({
+        title: 'Voice format unsupported',
+        description: 'This browser cannot record in a WhatsApp-compatible audio format. Use Safari or Firefox, or attach an audio file manually.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: format.mimeType });
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordedChunksRef.current = [];
+      recordingFormatRef.current = format;
+      shouldSendRecordingRef.current = true;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        toast({
+          title: 'Recording failed',
+          description: 'Unable to capture the voice message. Please try again.',
+          variant: 'destructive',
+        });
+        discardRecording();
+      };
+
+      recorder.onstop = () => {
+        void finalizeRecording();
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordingDurationSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDurationSeconds((currentValue) => currentValue + 1);
+      }, 1000);
+    } catch (error) {
+      stopRecordingStream();
+      mediaRecorderRef.current = null;
+      recordedChunksRef.current = [];
+      recordingFormatRef.current = null;
+      shouldSendRecordingRef.current = true;
+
+      const description =
+        error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'Microphone access was blocked. Allow microphone permission in the browser and try again.'
+          : error instanceof DOMException && error.name === 'NotFoundError'
+            ? 'No microphone was found on this device.'
+            : 'Unable to start voice recording.';
+
+      toast({
+        title: 'Microphone unavailable',
+        description,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const stopRecording = () => {
+    const recorder = mediaRecorderRef.current;
+
+    if (!recorder) {
+      resetRecordingState();
+      return;
+    }
+
+    shouldSendRecordingRef.current = true;
+    setIsRecording(false);
+    clearRecordingTimer();
+
+    if (recorder.state !== 'inactive') {
+      recorder.stop();
+      return;
+    }
+
+    void finalizeRecording();
+  };
+
+  const handleVoiceRecordingClick = () => {
+    if (isRecording) {
+      stopRecording();
+      return;
+    }
+
+    void startRecording();
+  };
+
   const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -1139,12 +1406,28 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
 
     void handleFileSend(file);
   };
+
+  useEffect(() => {
+    setMessage('');
+    discardRecording();
+  }, [conversationId]);
+
+  useEffect(() => {
+    return () => {
+      discardRecording();
+    };
+  }, []);
   
   return (
     <div className="p-3 border-t bg-background">
       {isBlocked ? (
         <div className="mb-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           This contact is blocked. Unblock the contact to send messages.
+        </div>
+      ) : null}
+      {isRecording ? (
+        <div className="mb-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+          Recording voice message {formatRecordingDuration(recordingDurationSeconds)}. Click the mic again to stop and send.
         </div>
       ) : null}
       {isUploadingAttachment ? (
@@ -1155,7 +1438,7 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
       <div className="flex items-end gap-2">
         <TooltipProvider>
           <EmojiPicker
-            disabled={isBlocked || isUploadingAttachment}
+            disabled={isBlocked || isUploadingAttachment || isRecording}
             onSelectEmoji={insertEmoji}
           />
           
@@ -1165,7 +1448,7 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
                 variant="ghost"
                 size="icon"
                 className="h-9 w-9 flex-shrink-0"
-                disabled={isBlocked || isUploadingAttachment}
+                disabled={isBlocked || isUploadingAttachment || isRecording}
                 onClick={() => attachmentInputRef.current?.click()}
               >
                 <Paperclip className="h-5 w-5 text-muted-foreground" />
@@ -1182,14 +1465,14 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
-            disabled={isBlocked || isUploadingAttachment}
+            disabled={isBlocked || isUploadingAttachment || isRecording}
             className="pr-10"
           />
           <Button
             variant="ghost"
             size="icon"
             className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            disabled={isBlocked || isUploadingAttachment}
+            disabled={isBlocked || isUploadingAttachment || isRecording}
             onClick={() => mediaInputRef.current?.click()}
           >
             <ImageIcon className="h-4 w-4 text-muted-foreground" />
@@ -1213,14 +1496,12 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
                   size="icon"
                   className={cn('h-9 w-9 flex-shrink-0', isRecording && 'text-destructive')}
                   disabled={isBlocked || isUploadingAttachment}
-                  onMouseDown={() => setIsRecording(true)}
-                  onMouseUp={() => setIsRecording(false)}
-                  onMouseLeave={() => setIsRecording(false)}
+                  onClick={handleVoiceRecordingClick}
                 >
                   <Mic className="h-5 w-5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Voice message</TooltipContent>
+              <TooltipContent>{isRecording ? 'Stop and send voice message' : 'Voice message'}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         )}
