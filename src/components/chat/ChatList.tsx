@@ -219,7 +219,9 @@ export function ChatList({ className }: ChatListProps) {
                 onArchive={() => {
                   void archiveConversation(conversation.id);
                 }}
-                onMute={() => muteConversation(conversation.id)}
+                onMute={() => {
+                  void muteConversation(conversation.id);
+                }}
                 onClear={() =>
                   setDangerDialogState({
                     action: 'clear',

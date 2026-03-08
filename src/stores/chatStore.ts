@@ -15,6 +15,9 @@ import {
   fetchConversation,
   sendMessage as apiSendMessage,
   toggleArchive as apiToggleArchive,
+  toggleMessagePinned as apiToggleMessagePinned,
+  toggleMessageStarred as apiToggleMessageStarred,
+  toggleMute as apiToggleMute,
   togglePin as apiTogglePin,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
@@ -150,6 +153,8 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
           status: 'read',
           timestamp: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
           isRead: true,
+          isPinned: false,
+          isStarred: false,
         }
       : undefined,
     unreadCount: conv.unreadCount,
@@ -216,9 +221,11 @@ interface ChatState {
   // Conversation Actions
   pinConversation: (id: string) => Promise<void>;
   archiveConversation: (id: string) => Promise<void>;
-  muteConversation: (id: string) => void;
+  muteConversation: (id: string) => Promise<void>;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+  toggleMessagePinned: (conversationId: string, messageId: string) => Promise<void>;
+  toggleMessageStarred: (conversationId: string, messageId: string) => Promise<void>;
   
   // Real-time updates
   handleNewMessage: (data: { conversationId: string | number; message: Message }) => void;
@@ -355,6 +362,8 @@ export const useChatStore = create<ChatState>()(
               webhookData: msg.webhookData,
               errorMessage: msg.errorMessage,
               isRead: msg.isRead,
+              isPinned: Boolean(msg.isPinned),
+              isStarred: Boolean(msg.isStarred),
               readAt: msg.readAt ? new Date(msg.readAt) : undefined,
               incomingPayload: msg.incomingPayload,
               outgoingPayload: msg.outgoingPayload,
@@ -441,6 +450,8 @@ export const useChatStore = create<ChatState>()(
           status: 'pending',
           timestamp: new Date(),
           isRead: false,
+          isPinned: false,
+          isStarred: false,
           mediaUrl,
         };
         
@@ -562,12 +573,25 @@ export const useChatStore = create<ChatState>()(
         }
       },
       
-      muteConversation: (id) => {
-        set((state) => ({
-          conversations: state.conversations.map(conv =>
-            conv.id === id ? { ...conv, isMuted: !conv.isMuted } : conv
-          ),
-        }));
+      muteConversation: async (id) => {
+        try {
+          const response = await apiToggleMute(id);
+          if (!response.success) {
+            throw new Error(response.message || 'Failed to update mute state');
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((conv) =>
+              conv.id === id
+                ? { ...conv, isMuted: response.data?.isMuted ?? !conv.isMuted }
+                : conv
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update mute state',
+          });
+        }
       },
       
       clearConversation: async (id) => {
@@ -618,6 +642,52 @@ export const useChatStore = create<ChatState>()(
           selectedConversationId: state.selectedConversationId === id ? null : state.selectedConversationId,
         }));
       },
+
+      toggleMessagePinned: async (conversationId, messageId) => {
+        const response = await apiToggleMessagePinned(conversationId, messageId);
+
+        if (!response.success) {
+          throw new Error(response.message || 'Failed to update pinned message');
+        }
+
+        set((state) => {
+          const newMap = new Map(state.messagesByConversation);
+          const messages = newMap.get(conversationId) || [];
+          newMap.set(
+            conversationId,
+            messages.map((message) =>
+              message.id === messageId
+                ? { ...message, isPinned: response.data?.isPinned ?? !message.isPinned }
+                : message
+            )
+          );
+
+          return { messagesByConversation: newMap };
+        });
+      },
+
+      toggleMessageStarred: async (conversationId, messageId) => {
+        const response = await apiToggleMessageStarred(conversationId, messageId);
+
+        if (!response.success) {
+          throw new Error(response.message || 'Failed to update starred message');
+        }
+
+        set((state) => {
+          const newMap = new Map(state.messagesByConversation);
+          const messages = newMap.get(conversationId) || [];
+          newMap.set(
+            conversationId,
+            messages.map((message) =>
+              message.id === messageId
+                ? { ...message, isStarred: response.data?.isStarred ?? !message.isStarred }
+                : message
+            )
+          );
+
+          return { messagesByConversation: newMap };
+        });
+      },
       
       // Handle new message from socket
       handleNewMessage: (data) => {
@@ -636,6 +706,8 @@ export const useChatStore = create<ChatState>()(
                 ...message,
                 conversationId: conversationKey,
                 timestamp: toMessageDate(message.timestamp as Date | string),
+                isPinned: Boolean(message.isPinned),
+                isStarred: Boolean(message.isStarred),
               },
             ])
           );

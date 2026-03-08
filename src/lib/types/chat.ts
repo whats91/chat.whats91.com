@@ -76,6 +76,8 @@ export interface Message {
   
   // Read status
   isRead: boolean;
+  isPinned: boolean;
+  isStarred: boolean;
   readAt?: Date | null;
   
   metadata?: {

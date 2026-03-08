@@ -82,6 +82,8 @@ function getSearchableMessageText(message: Message): string {
     .join(' ');
 
   return [
+    message.isPinned ? 'is:pinned pinned' : null,
+    message.isStarred ? 'is:starred starred' : null,
     resolved.content,
     resolved.mediaCaption,
     resolved.mediaFilename,
@@ -119,6 +121,7 @@ export function ConversationView({
     conversations,
     archiveConversation,
     getMessages,
+    muteConversation,
     pinConversation,
     sendMessage,
     loadConversations,
@@ -282,6 +285,9 @@ export function ConversationView({
         isSearchOpen={isSearchOpen}
         onInfoClick={() => toggleRightPanel()}
         isInfoOpen={isRightPanelOpen}
+        onMuteToggle={() => {
+          void muteConversation(conversation.id);
+        }}
         onArchiveToggle={() => {
           void archiveConversation(conversation.id);
         }}
@@ -371,6 +377,7 @@ interface ConversationHeaderProps {
   isSearchOpen: boolean;
   onInfoClick: () => void;
   isInfoOpen: boolean;
+  onMuteToggle: () => void;
   onArchiveToggle: () => void;
   onPinToggle: () => void;
   onClearChat: () => void;
@@ -385,6 +392,7 @@ function ConversationHeader({
   isSearchOpen,
   onInfoClick,
   isInfoOpen,
+  onMuteToggle,
   onArchiveToggle,
   onPinToggle,
   onClearChat,
@@ -476,7 +484,9 @@ function ConversationHeader({
             <DropdownMenuItem onClick={onSearchClick}>
               {isSearchOpen ? 'Close search' : 'Search'}
             </DropdownMenuItem>
-            <DropdownMenuItem>Mute notifications</DropdownMenuItem>
+            <DropdownMenuItem onClick={onMuteToggle}>
+              {conversation.isMuted ? 'Unmute notifications' : 'Mute notifications'}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onInfoClick}>
               <Info className="h-4 w-4 mr-2" />
@@ -706,6 +716,7 @@ function MessageBubble({
   isActiveMatch,
   showTimestamp,
 }: MessageBubbleProps) {
+  const { toggleMessagePinned, toggleMessageStarred } = useChatStore();
   const isSending = message.status === 'pending';
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
@@ -717,24 +728,105 @@ function MessageBubble({
     if (isDelivered || isRead) return <CheckCheck className={cn('h-3 w-3', isRead && 'text-primary')} />;
     return null;
   };
+
+  const handleTogglePinned = async () => {
+    try {
+      await toggleMessagePinned(message.conversationId, message.id);
+    } catch (error) {
+      toast({
+        title: 'Unable to update pinned state',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleToggleStarred = async () => {
+    try {
+      await toggleMessageStarred(message.conversationId, message.id);
+    } catch (error) {
+      toast({
+        title: 'Unable to update starred state',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const messageMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="mt-1 h-7 w-7 shrink-0 opacity-70 transition-opacity hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100"
+        >
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={isOwn ? 'end' : 'start'}>
+        <DropdownMenuItem
+          onClick={() => {
+            void handleTogglePinned();
+          }}
+        >
+          <Pin className="mr-2 h-4 w-4" />
+          {message.isPinned ? 'Unpin message' : 'Pin message'}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            void handleToggleStarred();
+          }}
+        >
+          <Star className="mr-2 h-4 w-4" />
+          {message.isStarred ? 'Unstar message' : 'Star message'}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   
   return (
     <div
       className={cn(
-        'mb-1 flex w-full',
+        'group mb-1 flex w-full items-start gap-1',
         isOwn ? 'justify-end' : 'justify-start'
       )}
     >
+      {isOwn ? messageMenu : null}
       <div
         className={cn(
           'w-fit max-w-[min(85vw,24rem)] rounded-lg px-3 py-2 transition-shadow',
           isOwn
             ? 'bg-primary text-primary-foreground'
             : 'bg-muted',
+          message.isPinned && 'shadow-sm ring-1 ring-primary/30',
+          message.isStarred && 'shadow-sm shadow-amber-400/20',
           isActiveMatch && 'ring-2 ring-primary/50 shadow-sm',
           !isActiveMatch && isMatched && 'ring-1 ring-primary/20'
         )}
       >
+        {message.isPinned || message.isStarred ? (
+          <div
+            className={cn(
+              'mb-1 flex items-center gap-2 text-[11px] font-medium',
+              isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground'
+            )}
+          >
+            {message.isPinned ? (
+              <span className="inline-flex items-center gap-1">
+                <Pin className="h-3 w-3" />
+                <span>Pinned</span>
+              </span>
+            ) : null}
+            {message.isStarred ? (
+              <span className="inline-flex items-center gap-1">
+                <Star className="h-3 w-3" />
+                <span>Starred</span>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         <MessageBubbleContent message={message} isOwn={isOwn} onOpenMedia={onOpenMedia} />
         {showTimestamp && (
           <div
@@ -748,6 +840,7 @@ function MessageBubble({
           </div>
         )}
       </div>
+      {!isOwn ? messageMenu : null}
     </div>
   );
 }

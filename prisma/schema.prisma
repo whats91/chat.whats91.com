@@ -186,6 +186,8 @@ model ConversationMessage {
   
   status             String    @default("pending")
   isRead             Boolean   @default(false) @map("is_read")
+  isPinned           Boolean   @default(false) @map("is_pinned")
+  isStarred          Boolean   @default(false) @map("is_starred")
   readAt             DateTime? @map("read_at")
   
   repliedToMessageId String?   @map("replied_to_message_id")

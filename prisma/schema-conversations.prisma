@@ -91,6 +91,8 @@ model ConversationMessage {
   // Status
   status              String    @default("pending") // pending, sent, delivered, read, failed
   isRead              Boolean   @default(false) @map("is_read")
+  isPinned            Boolean   @default(false) @map("is_pinned")
+  isStarred           Boolean   @default(false) @map("is_starred")
   readAt              DateTime? @map("read_at")
   
   // Reply/Forward

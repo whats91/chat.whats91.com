@@ -46,6 +46,8 @@ export interface NewMessageEvent extends PubSubEvent {
       mediaUrl?: string | null;
       mediaMimeType?: string | null;
       mediaFilename?: string | null;
+      isPinned?: boolean;
+      isStarred?: boolean;
       incomingPayload?: Record<string, unknown> | null;
       outgoingPayload?: Record<string, unknown> | null;
     };
@@ -182,6 +184,8 @@ export async function publishNewMessage(
     mediaUrl?: string | null;
     mediaMimeType?: string | null;
     mediaFilename?: string | null;
+    isPinned?: boolean;
+    isStarred?: boolean;
     incomingPayload?: Record<string, unknown> | null;
     outgoingPayload?: Record<string, unknown> | null;
   }

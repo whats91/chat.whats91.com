@@ -137,6 +137,18 @@ export async function markAsRead(conversationId: string | number): Promise<{ suc
 }
 
 /**
+ * Toggle mute status
+ */
+export async function toggleMute(conversationId: string | number): Promise<{ success: boolean; message: string; data?: { isMuted: boolean } }> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/mute`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+/**
  * Toggle archive status
  */
 export async function toggleArchive(conversationId: string | number): Promise<{ success: boolean; message: string; data?: { isArchived: boolean } }> {
@@ -157,6 +169,30 @@ export async function togglePin(conversationId: string | number): Promise<{ succ
     headers: getHeaders(),
   });
   
+  return response.json();
+}
+
+export async function toggleMessagePinned(
+  conversationId: string | number,
+  messageId: string | number
+): Promise<{ success: boolean; message: string; data?: { isPinned: boolean } }> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages/${messageId}/pin`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+export async function toggleMessageStarred(
+  conversationId: string | number,
+  messageId: string | number
+): Promise<{ success: boolean; message: string; data?: { isStarred: boolean } }> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages/${messageId}/star`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+  });
+
   return response.json();
 }
 
@@ -221,8 +257,11 @@ export const api = {
     fetchConversationTargets,
     startConversation,
     markAsRead,
+    toggleMute,
     toggleArchive,
     togglePin,
+    toggleMessagePinned,
+    toggleMessageStarred,
     clear: clearConversation,
     delete: deleteConversation,
     uploadMedia,

@@ -103,7 +103,7 @@ export function AppShell() {
       // Mute chat: Ctrl/Cmd + M
       if (isCtrl && e.key.toLowerCase() === SHORTCUTS.muteChat.key && selectedConversationId) {
         e.preventDefault();
-        useChatStore.getState().muteConversation(selectedConversationId);
+        void useChatStore.getState().muteConversation(selectedConversationId);
         return;
       }
     },

@@ -39,7 +39,7 @@ interface RightInfoPanelProps {
 }
 
 export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps) {
-  const { conversations, labels, toggleRightPanel } = useChatStore();
+  const { conversations, labels, muteConversation, toggleRightPanel } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   
@@ -147,7 +147,12 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
         <Separator />
         
         {/* Mute / Notifications */}
-        <button className="flex items-center gap-3 p-4 w-full text-left hover:bg-muted/50">
+        <button
+          className="flex items-center gap-3 p-4 w-full text-left hover:bg-muted/50"
+          onClick={() => {
+            void muteConversation(conversation.id);
+          }}
+        >
           {conversation.isMuted ? (
             <BellOff className="h-5 w-5 text-muted-foreground" />
           ) : (

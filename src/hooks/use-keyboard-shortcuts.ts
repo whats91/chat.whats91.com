@@ -117,7 +117,7 @@ export function useKeyboardShortcuts() {
         selectedConversationId
       ) {
         e.preventDefault();
-        useChatStore.getState().muteConversation(selectedConversationId);
+        void useChatStore.getState().muteConversation(selectedConversationId);
         return;
       }
     },

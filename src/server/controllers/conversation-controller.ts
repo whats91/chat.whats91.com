@@ -628,13 +628,15 @@ export async function getConversationById({
       webhookData: msg.webhook_data,
       errorMessage: msg.error_message,
       isRead: msg.is_read || false,
+      isPinned: msg.is_pinned || false,
+      isStarred: msg.is_starred || false,
       readAt: msg.read_at,
     }));
     
     // Mark as read and clear unread count
     await executeConversationsDb(
-      `UPDATE conversations SET unread_count = 0, updated_at = datetime('now') WHERE id = ?`,
-      [conversationId]
+      `UPDATE conversations SET unread_count = 0, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+      [conversationId, userId]
     );
     
     return {
@@ -957,6 +959,8 @@ export async function sendMessage({
         mediaUrl: newMessage.media_url,
         mediaMimeType: newMessage.media_mime_type,
         mediaFilename: newMessage.media_filename,
+        isPinned: Boolean(newMessage.is_pinned),
+        isStarred: Boolean(newMessage.is_starred),
         outgoingPayload: messagePayload,
       }
     );
@@ -1101,6 +1105,39 @@ export async function togglePinConversation(conversationId: number, userId: stri
   } catch (error) {
     log.error('togglePin error', { error: error instanceof Error ? error.message : error });
     return { success: false, message: 'Failed to toggle pin' };
+  }
+}
+
+// ========================================
+// TOGGLE MUTE
+// ========================================
+
+export async function toggleMuteConversation(conversationId: number, userId: string) {
+  try {
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT is_muted FROM conversations WHERE id = ? AND user_id = ?`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+
+    const newMutedState = !conversation.is_muted;
+
+    await executeConversationsDb(
+      `UPDATE conversations SET is_muted = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+      [newMutedState, conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: newMutedState ? 'Conversation muted' : 'Conversation unmuted',
+      data: { isMuted: newMutedState },
+    };
+  } catch (error) {
+    log.error('toggleMute error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to toggle mute' };
   }
 }
 
@@ -1351,6 +1388,8 @@ export async function processIncomingMessage(data: IncomingMessageData) {
       mediaUrl: storedMessage.media_url || null,
       mediaMimeType: storedMessage.media_mime_type || null,
       mediaFilename: storedMessage.media_filename || null,
+      isPinned: Boolean(storedMessage.is_pinned),
+      isStarred: Boolean(storedMessage.is_starred),
       incomingPayload: incomingPayload || null,
     });
     
@@ -1363,6 +1402,99 @@ export async function processIncomingMessage(data: IncomingMessageData) {
     log.error('processIncomingMessage error', { error: error instanceof Error ? error.message : error });
     return { success: false, message: 'Failed to process message' };
   }
+}
+
+// ========================================
+// TOGGLE MESSAGE PIN / STAR
+// ========================================
+
+async function toggleMessageFlag({
+  conversationId,
+  messageId,
+  userId,
+  column,
+  successOn,
+  successOff,
+}: {
+  conversationId: number;
+  messageId: number;
+  userId: string;
+  column: 'is_pinned' | 'is_starred';
+  successOn: string;
+  successOff: string;
+}) {
+  try {
+    const [message] = await queryConversationsDb<{ currentValue: number | boolean }>(
+      `SELECT cm.${column} as currentValue
+       FROM conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       WHERE cm.id = ? AND cm.conversation_id = ? AND c.user_id = ?
+       LIMIT 1`,
+      [messageId, conversationId, userId]
+    );
+
+    if (!message) {
+      return { success: false, message: 'Message not found', data: null };
+    }
+
+    const nextValue = !Boolean(message.currentValue);
+
+    await executeConversationsDb(
+      `UPDATE conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       SET cm.${column} = ?, cm.updated_at = CURRENT_TIMESTAMP
+       WHERE cm.id = ? AND cm.conversation_id = ? AND c.user_id = ?`,
+      [nextValue, messageId, conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: nextValue ? successOn : successOff,
+      data: nextValue,
+    };
+  } catch (error) {
+    log.error('toggleMessageFlag error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      messageId,
+      column,
+    });
+    return { success: false, message: 'Failed to update message flag', data: null };
+  }
+}
+
+export async function toggleMessagePinned(conversationId: number, messageId: number, userId: string) {
+  const result = await toggleMessageFlag({
+    conversationId,
+    messageId,
+    userId,
+    column: 'is_pinned',
+    successOn: 'Message pinned',
+    successOff: 'Message unpinned',
+  });
+
+  return {
+    success: result.success,
+    message: result.message,
+    data: result.success ? { isPinned: Boolean(result.data) } : null,
+  };
+}
+
+export async function toggleMessageStarred(conversationId: number, messageId: number, userId: string) {
+  const result = await toggleMessageFlag({
+    conversationId,
+    messageId,
+    userId,
+    column: 'is_starred',
+    successOn: 'Message starred',
+    successOff: 'Message unstarred',
+  });
+
+  return {
+    success: result.success,
+    message: result.message,
+    data: result.success ? { isStarred: Boolean(result.data) } : null,
+  };
 }
 
 // ========================================
@@ -1416,6 +1548,9 @@ export const conversationController = {
   markAsRead: markConversationAsRead,
   toggleArchive: toggleArchiveConversation,
   togglePin: togglePinConversation,
+  toggleMute: toggleMuteConversation,
+  toggleMessagePinned,
+  toggleMessageStarred,
   clear: clearConversation,
   delete: deleteConversation,
   processIncomingMessage,
