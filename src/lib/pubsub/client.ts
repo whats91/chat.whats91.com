@@ -12,6 +12,8 @@ interface PubSubClientConfig {
   url?: string;
 }
 
+const DEFAULT_PUBSUB_STREAM_PATH = '/api/pubsub/stream';
+
 class PubSubClient {
   private readonly baseUrl: string;
   private eventSource: EventSource | null = null;
@@ -24,7 +26,50 @@ class PubSubClient {
   private subscriberId: string | null = null;
 
   constructor(config: PubSubClientConfig = {}) {
-    this.baseUrl = config.url || process.env.NEXT_PUBLIC_PUBSUB_URL || '/api/pubsub/stream';
+    this.baseUrl =
+      config.url || process.env.NEXT_PUBLIC_PUBSUB_URL || DEFAULT_PUBSUB_STREAM_PATH;
+  }
+
+  private resolveBaseUrl(): URL {
+    const fallbackUrl = new URL(DEFAULT_PUBSUB_STREAM_PATH, window.location.origin);
+
+    try {
+      const configuredUrl = new URL(this.baseUrl, window.location.origin);
+
+      // The browser client uses EventSource, so ws/wss endpoints are invalid here.
+      if (configuredUrl.protocol === 'ws:' || configuredUrl.protocol === 'wss:') {
+        console.warn(
+          '[PubSub] Ignoring websocket endpoint for EventSource client:',
+          configuredUrl.toString()
+        );
+        return fallbackUrl;
+      }
+
+      if (
+        configuredUrl.protocol !== 'http:' &&
+        configuredUrl.protocol !== 'https:'
+      ) {
+        console.warn(
+          '[PubSub] Ignoring unsupported pub/sub protocol:',
+          configuredUrl.toString()
+        );
+        return fallbackUrl;
+      }
+
+      // Keep the browser on same-origin SSE to avoid cross-origin EventSource issues.
+      if (configuredUrl.origin !== window.location.origin) {
+        console.warn(
+          '[PubSub] Ignoring cross-origin pub/sub endpoint:',
+          configuredUrl.toString()
+        );
+        return fallbackUrl;
+      }
+
+      return configuredUrl;
+    } catch (error) {
+      console.warn('[PubSub] Failed to resolve pub/sub endpoint, using fallback.', error);
+      return fallbackUrl;
+    }
   }
 
   private buildStreamUrl(): string | null {
@@ -32,9 +77,7 @@ class PubSubClient {
       return null;
     }
 
-    const url = this.baseUrl.startsWith('http')
-      ? new URL(this.baseUrl)
-      : new URL(this.baseUrl, window.location.origin);
+    const url = this.resolveBaseUrl();
     url.searchParams.set('channel', this.subscribedChannel);
     return url.toString();
   }

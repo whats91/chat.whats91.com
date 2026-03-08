@@ -23,11 +23,18 @@ export function getCurrentUserId(): string {
     return '';
   }
 
-  return (
-    readUserIdCookie() ||
-    window.localStorage.getItem(AUTH_USER_ID_STORAGE_KEY) ||
-    ''
-  );
+  const cookieUserId = readUserIdCookie();
+
+  if (cookieUserId) {
+    if (window.localStorage.getItem(AUTH_USER_ID_STORAGE_KEY) !== cookieUserId) {
+      window.localStorage.setItem(AUTH_USER_ID_STORAGE_KEY, cookieUserId);
+    }
+
+    return cookieUserId;
+  }
+
+  window.localStorage.removeItem(AUTH_USER_ID_STORAGE_KEY);
+  return '';
 }
 
 export function setCurrentUserId(userId: string): void {
