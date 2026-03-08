@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
+import { EmojiPicker } from '@/components/chat/EmojiPicker';
 import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
@@ -12,7 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
-import { fetchPinnedMessage, sendMessage as sendConversationMessage } from '@/lib/api/client';
+import {
+  fetchPinnedMessage,
+  sendMessage as sendConversationMessage,
+  uploadMedia,
+} from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
@@ -40,7 +45,6 @@ import {
   ChevronUp,
   Paperclip,
   Image as ImageIcon,
-  Smile,
   Mic,
   Send,
   Check,
@@ -1011,9 +1015,45 @@ interface MessageComposerProps {
   onSend: (content: string) => void;
 }
 
-function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
+const MEDIA_FILE_ACCEPT = 'image/*,video/*,audio/*';
+const ATTACHMENT_FILE_ACCEPT = [
+  MEDIA_FILE_ACCEPT,
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+].join(',');
+
+function inferMessageTypeFromFile(file: File): SendMessageRequest['messageType'] {
+  const mimeType = file.type.toLowerCase();
+  const filename = file.name.toLowerCase();
+
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (filename.endsWith('.jpg') || filename.endsWith('.jpeg') || filename.endsWith('.png') || filename.endsWith('.gif') || filename.endsWith('.webp')) {
+    return 'image';
+  }
+  if (filename.endsWith('.mp4') || filename.endsWith('.mov') || filename.endsWith('.webm')) {
+    return 'video';
+  }
+  if (filename.endsWith('.mp3') || filename.endsWith('.m4a') || filename.endsWith('.ogg') || filename.endsWith('.wav') || filename.endsWith('.aac')) {
+    return 'audio';
+  }
+
+  return 'document';
+}
+
+function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerProps) {
+  const { loadConversations, loadMessages } = useChatStore();
   const [message, setMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   
   const handleSend = () => {
     if (!isBlocked && message.trim()) {
@@ -1028,6 +1068,77 @@ function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
       handleSend();
     }
   };
+
+  const insertEmoji = (emoji: string) => {
+    const input = messageInputRef.current;
+    const selectionStart = input?.selectionStart ?? message.length;
+    const selectionEnd = input?.selectionEnd ?? message.length;
+
+    const nextMessage = `${message.slice(0, selectionStart)}${emoji}${message.slice(selectionEnd)}`;
+    setMessage(nextMessage);
+
+    requestAnimationFrame(() => {
+      const cursorPosition = selectionStart + emoji.length;
+      input?.focus();
+      input?.setSelectionRange(cursorPosition, cursorPosition);
+    });
+  };
+
+  const handleFileSend = async (file: File) => {
+    if (isBlocked) {
+      return;
+    }
+
+    const messageType = inferMessageTypeFromFile(file);
+    const trimmedCaption = message.trim() || undefined;
+    const messageContent =
+      trimmedCaption || (messageType === 'document' ? file.name : undefined);
+
+    try {
+      setIsUploadingAttachment(true);
+
+      const uploadResponse = await uploadMedia(conversationId, file);
+      const uploadEntry = uploadResponse.data?.[0];
+
+      if (!uploadResponse.success || !uploadEntry?.uploadToken) {
+        throw new Error(uploadResponse.message || 'Unable to upload the selected file');
+      }
+
+      const sendResponse = await sendConversationMessage(conversationId, {
+        messageType,
+        messageContent,
+        mediaCaption: messageType === 'audio' ? undefined : trimmedCaption,
+        mediaUploadToken: uploadEntry.uploadToken,
+      });
+
+      if (!sendResponse.success) {
+        throw new Error(sendResponse.message || 'Unable to send the selected file');
+      }
+
+      setMessage('');
+      await loadMessages(conversationId);
+      await loadConversations();
+    } catch (error) {
+      toast({
+        title: 'Attachment failed',
+        description: error instanceof Error ? error.message : 'Unable to send the selected file',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  };
+
+  const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    void handleFileSend(file);
+  };
   
   return (
     <div className="p-3 border-t bg-background">
@@ -1036,20 +1147,27 @@ function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
           This contact is blocked. Unblock the contact to send messages.
         </div>
       ) : null}
+      {isUploadingAttachment ? (
+        <div className="mb-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Uploading attachment...
+        </div>
+      ) : null}
       <div className="flex items-end gap-2">
         <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" disabled={isBlocked}>
-                <Smile className="h-5 w-5 text-muted-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Emoji</TooltipContent>
-          </Tooltip>
+          <EmojiPicker
+            disabled={isBlocked || isUploadingAttachment}
+            onSelectEmoji={insertEmoji}
+          />
           
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" disabled={isBlocked}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 flex-shrink-0"
+                disabled={isBlocked || isUploadingAttachment}
+                onClick={() => attachmentInputRef.current?.click()}
+              >
                 <Paperclip className="h-5 w-5 text-muted-foreground" />
               </Button>
             </TooltipTrigger>
@@ -1059,24 +1177,26 @@ function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
         
         <div className="flex-1 relative">
           <Input
+            ref={messageInputRef}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
-            disabled={isBlocked}
+            disabled={isBlocked || isUploadingAttachment}
             className="pr-10"
           />
           <Button
             variant="ghost"
             size="icon"
             className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            disabled={isBlocked}
+            disabled={isBlocked || isUploadingAttachment}
+            onClick={() => mediaInputRef.current?.click()}
           >
             <ImageIcon className="h-4 w-4 text-muted-foreground" />
           </Button>
         </div>
         
-        {!isBlocked && message.trim() ? (
+        {!isBlocked && !isUploadingAttachment && message.trim() ? (
           <Button
             size="icon"
             className="h-9 w-9 flex-shrink-0"
@@ -1092,7 +1212,7 @@ function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
                   variant="ghost"
                   size="icon"
                   className={cn('h-9 w-9 flex-shrink-0', isRecording && 'text-destructive')}
-                  disabled={isBlocked}
+                  disabled={isBlocked || isUploadingAttachment}
                   onMouseDown={() => setIsRecording(true)}
                   onMouseUp={() => setIsRecording(false)}
                   onMouseLeave={() => setIsRecording(false)}
@@ -1105,6 +1225,22 @@ function MessageComposer({ isBlocked, onSend }: MessageComposerProps) {
           </TooltipProvider>
         )}
       </div>
+
+      <input
+        ref={attachmentInputRef}
+        type="file"
+        className="hidden"
+        accept={ATTACHMENT_FILE_ACCEPT}
+        onChange={handleAttachmentChange}
+      />
+
+      <input
+        ref={mediaInputRef}
+        type="file"
+        className="hidden"
+        accept={MEDIA_FILE_ACCEPT}
+        onChange={handleAttachmentChange}
+      />
     </div>
   );
 }
