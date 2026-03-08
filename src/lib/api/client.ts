@@ -161,6 +161,18 @@ export async function togglePin(conversationId: string | number): Promise<{ succ
 }
 
 /**
+ * Clear conversation messages but keep the conversation
+ */
+export async function clearConversation(conversationId: string | number): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/clear`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+/**
  * Delete conversation
  */
 export async function deleteConversation(conversationId: string | number): Promise<{ success: boolean; message: string }> {
@@ -211,6 +223,7 @@ export const api = {
     markAsRead,
     toggleArchive,
     togglePin,
+    clear: clearConversation,
     delete: deleteConversation,
     uploadMedia,
   },

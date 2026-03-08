@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
 import { cn } from '@/lib/utils';
@@ -10,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
-import { sendMessage as sendConversationMessage, startConversation } from '@/lib/api/client';
+import { sendMessage as sendConversationMessage } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
@@ -126,6 +127,7 @@ export function ConversationView({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
+  const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   
   const conversation = conversations.find(c => c.id === conversationId);
   const messages = [...getMessages(conversationId)].sort(compareMessageTimeline);
@@ -210,20 +212,10 @@ export function ConversationView({
     const failedTargets: string[] = [];
 
     for (const target of targets) {
-      let targetConversationId = target.conversationId;
-
+      const targetConversationId = target.conversationId;
       if (!targetConversationId) {
-        const startResponse = await startConversation({
-          phone: target.phone,
-          contactName: target.contactName,
-        });
-
-        if (!startResponse.success || !startResponse.data) {
-          failedTargets.push(target.displayName);
-          continue;
-        }
-
-        targetConversationId = startResponse.data.conversationId;
+        failedTargets.push(target.displayName);
+        continue;
       }
 
       const sendResponse = await sendConversationMessage(targetConversationId, payload);
@@ -286,6 +278,8 @@ export function ConversationView({
         isSearchOpen={isSearchOpen}
         onInfoClick={() => toggleRightPanel()}
         isInfoOpen={isRightPanelOpen}
+        onClearChat={() => setDangerAction('clear')}
+        onDeleteConversation={() => setDangerAction('delete')}
       />
 
       {isSearchOpen ? (
@@ -339,7 +333,21 @@ export function ConversationView({
         description="Select one or more contacts, then confirm."
         selectionMode="multiple"
         confirmButtonText="Forward"
+        allowManualEntry={false}
+        sourceFilter="conversation"
         onConfirmSelection={handleForwardConfirm}
+      />
+
+      <ConversationDangerDialog
+        open={dangerAction !== null}
+        action={dangerAction}
+        conversationId={conversation.id}
+        conversationName={conversation.participant?.name || conversation.contactName || conversation.contactPhone}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDangerAction(null);
+          }
+        }}
       />
     </div>
   );
@@ -353,6 +361,8 @@ interface ConversationHeaderProps {
   isSearchOpen: boolean;
   onInfoClick: () => void;
   isInfoOpen: boolean;
+  onClearChat: () => void;
+  onDeleteConversation: () => void;
 }
 
 function ConversationHeader({
@@ -363,6 +373,8 @@ function ConversationHeader({
   isSearchOpen,
   onInfoClick,
   isInfoOpen,
+  onClearChat,
+  onDeleteConversation,
 }: ConversationHeaderProps) {
   const { participant, typing } = conversation;
   const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
@@ -458,9 +470,13 @@ function ConversationHeader({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive">Block</DropdownMenuItem>
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem onClick={onClearChat}>
               <Trash2 className="h-4 w-4 mr-2" />
-              Delete chat
+              Clear chat
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive" onClick={onDeleteConversation}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete conversation
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

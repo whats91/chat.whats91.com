@@ -226,6 +226,7 @@ export async function getConversations({
       lastMessageType: conv.last_message_type,
       lastMessageDirection: conv.last_message_direction,
       lastMessageAt: conv.last_message_at,
+      updatedAt: conv.updated_at,
       lastMessageTimeAgo: formatTimeAgo(conv.last_message_at),
       unreadCount: toSafeNumber(conv.unread_count),
       isPinned: conv.is_pinned || false,
@@ -1104,22 +1105,89 @@ export async function togglePinConversation(conversationId: number, userId: stri
 }
 
 // ========================================
+// CLEAR CONVERSATION
+// ========================================
+
+export async function clearConversation(conversationId: number, userId: string) {
+  try {
+    const [conversation] = await queryConversationsDb<{ id: number }>(
+      `SELECT id
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+
+    await executeConversationsDb(
+      `DELETE FROM conversation_messages
+       WHERE conversation_id IN (
+         SELECT id FROM conversations WHERE id = ? AND user_id = ?
+       )`,
+      [conversationId, userId]
+    );
+
+    await executeConversationsDb(
+      `UPDATE conversations
+       SET last_message_id = NULL,
+           last_message_content = NULL,
+           last_message_type = NULL,
+           last_message_at = NULL,
+           last_message_direction = NULL,
+           unread_count = 0,
+           total_messages = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: 'Chat cleared',
+    };
+  } catch (error) {
+    log.error('clearConversation error', { error: error instanceof Error ? error.message : error });
+    return { success: false, message: 'Failed to clear chat' };
+  }
+}
+
+// ========================================
 // DELETE CONVERSATION
 // ========================================
 
 export async function deleteConversation(conversationId: number, userId: string) {
   try {
-    // Delete messages first
-    await executeConversationsDb(
-      `DELETE FROM conversation_messages WHERE conversation_id = ?`,
-      [conversationId]
+    const [conversation] = await queryConversationsDb<{ id: number }>(
+      `SELECT id
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
     );
-    
-    // Delete conversation
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+
     await executeConversationsDb(
+      `DELETE FROM conversation_messages
+       WHERE conversation_id IN (
+         SELECT id FROM conversations WHERE id = ? AND user_id = ?
+       )`,
+      [conversationId, userId]
+    );
+
+    const deleteResult = await executeConversationsDb(
       `DELETE FROM conversations WHERE id = ? AND user_id = ?`,
       [conversationId, userId]
     );
+
+    if (deleteResult.affectedRows === 0) {
+      return { success: false, message: 'Conversation not found' };
+    }
     
     return {
       success: true,
@@ -1348,6 +1416,7 @@ export const conversationController = {
   markAsRead: markConversationAsRead,
   toggleArchive: toggleArchiveConversation,
   togglePin: togglePinConversation,
+  clear: clearConversation,
   delete: deleteConversation,
   processIncomingMessage,
   updateMessageStatus,

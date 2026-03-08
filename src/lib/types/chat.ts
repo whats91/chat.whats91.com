@@ -146,6 +146,7 @@ export interface ConversationListItem {
   lastMessageType: string | null;
   lastMessageDirection: MessageDirection | null;
   lastMessageAt: Date | null;
+  updatedAt: Date | null;
   lastMessageTimeAgo: string;
   unreadCount: number;
   isPinned: boolean;

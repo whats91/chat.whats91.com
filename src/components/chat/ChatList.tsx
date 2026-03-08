@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -20,6 +21,7 @@ import {
   Archive,
   BellOff,
   Trash2,
+  Eraser,
   Search,
   MoreVertical,
   MessageSquarePlus,
@@ -43,11 +45,15 @@ export function ChatList({ className }: ChatListProps) {
     pinConversation,
     archiveConversation,
     muteConversation,
-    deleteConversation,
     toggleNewChatModal,
   } = useChatStore();
   
   const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all');
+  const [dangerDialogState, setDangerDialogState] = useState<{
+    action: 'clear' | 'delete';
+    conversationId: string;
+    conversationName: string;
+  } | null>(null);
   
   const filteredConversations = conversations
     .filter(conv => {
@@ -63,9 +69,9 @@ export function ChatList({ className }: ChatListProps) {
   
   const searchFiltered = searchQuery
     ? filteredConversations.filter(conv =>
-        conv.participant.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        conv.participant.phone.includes(searchQuery) ||
-        conv.lastMessage?.content.toLowerCase().includes(searchQuery.toLowerCase())
+        (conv.participant?.name || conv.contactName || conv.contactPhone).toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (conv.participant?.phone || conv.contactPhone).includes(searchQuery) ||
+        conv.lastMessage?.content?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : filteredConversations;
   
@@ -162,12 +168,39 @@ export function ChatList({ className }: ChatListProps) {
                 onPin={() => pinConversation(conversation.id)}
                 onArchive={() => archiveConversation(conversation.id)}
                 onMute={() => muteConversation(conversation.id)}
-                onDelete={() => deleteConversation(conversation.id)}
+                onClear={() =>
+                  setDangerDialogState({
+                    action: 'clear',
+                    conversationId: conversation.id,
+                    conversationName:
+                      conversation.participant?.name || conversation.contactName || conversation.contactPhone,
+                  })
+                }
+                onDelete={() =>
+                  setDangerDialogState({
+                    action: 'delete',
+                    conversationId: conversation.id,
+                    conversationName:
+                      conversation.participant?.name || conversation.contactName || conversation.contactPhone,
+                  })
+                }
               />
             ))}
           </div>
         )}
       </ScrollArea>
+
+      <ConversationDangerDialog
+        open={dangerDialogState !== null}
+        action={dangerDialogState?.action || null}
+        conversationId={dangerDialogState?.conversationId || null}
+        conversationName={dangerDialogState?.conversationName || null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDangerDialogState(null);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -179,6 +212,7 @@ interface ChatListItemProps {
   onPin: () => void;
   onArchive: () => void;
   onMute: () => void;
+  onClear: () => void;
   onDelete: () => void;
 }
 
@@ -189,11 +223,16 @@ function ChatListItem({
   onPin,
   onArchive,
   onMute,
+  onClear,
   onDelete,
 }: ChatListItemProps) {
   const { participant, lastMessage, unreadCount, isPinned, isMuted, typing } = conversation;
+  const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
+  const participantPhone = participant?.phone || conversation.contactPhone;
+  const participantAvatar = participant?.avatar;
+  const participantStatus = participant?.status;
   
-  const initials = participant.name
+  const initials = participantName
     .split(' ')
     .map(n => n[0])
     .join('')
@@ -215,12 +254,12 @@ function ChatListItem({
       {/* Avatar */}
       <div className="relative flex-shrink-0">
         <Avatar className="h-12 w-12">
-          <AvatarImage src={participant.avatar} alt={participant.name} />
+          <AvatarImage src={participantAvatar} alt={participantName} />
           <AvatarFallback className="bg-primary/20 text-primary font-medium">
             {initials}
           </AvatarFallback>
         </Avatar>
-        {participant.status === 'online' && (
+        {participantStatus === 'online' && (
           <div className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 border-2 border-background rounded-full" />
         )}
       </div>
@@ -229,7 +268,7 @@ function ChatListItem({
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="font-medium truncate">{participant.name}</span>
+            <span className="font-medium truncate">{participantName}</span>
             {isPinned && <Pin className="h-3 w-3 text-muted-foreground" />}
             {isMuted && <BellOff className="h-3 w-3 text-muted-foreground" />}
           </div>
@@ -242,7 +281,7 @@ function ChatListItem({
             {typing?.isTyping ? (
               <span className="text-primary">typing...</span>
             ) : (
-              lastMessage?.content
+              lastMessage?.content || participantPhone
             )}
           </p>
           {unreadCount > 0 && (
@@ -279,9 +318,13 @@ function ChatListItem({
             {conversation.isArchived ? 'Unarchive' : 'Archive'}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onClear}>
+            <Eraser className="h-4 w-4 mr-2" />
+            Clear chat
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={onDelete} className="text-destructive">
             <Trash2 className="h-4 w-4 mr-2" />
-            Delete chat
+            Delete conversation
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

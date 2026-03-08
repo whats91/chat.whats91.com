@@ -29,6 +29,8 @@ interface ConversationTargetPickerDialogProps {
   selectionMode?: 'single' | 'multiple';
   confirmLabel?: string;
   confirmButtonText?: string;
+  allowManualEntry?: boolean;
+  sourceFilter?: 'all' | 'conversation' | 'contact';
 }
 
 function normalizePhoneInput(value: string): string {
@@ -58,6 +60,8 @@ export function ConversationTargetPickerDialog({
   selectionMode = 'single',
   confirmLabel,
   confirmButtonText = 'Forward',
+  allowManualEntry = true,
+  sourceFilter = 'all',
 }: ConversationTargetPickerDialogProps) {
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
@@ -122,13 +126,24 @@ export function ConversationTargetPickerDialog({
   }, [deferredSearch, open]);
 
   const selectableTargets = useMemo(() => {
+    const filteredTargets = targets.filter((target) => {
+      if (sourceFilter === 'all') {
+        return true;
+      }
+
+      return target.source === sourceFilter;
+    });
+
     const normalizedSearchPhone = normalizePhoneInput(search);
-    const hasExistingPhone = targets.some(
+    const hasExistingPhone = filteredTargets.some(
       (target) => normalizePhoneInput(target.phone) === normalizedSearchPhone
     );
 
     const manualTarget =
-      normalizedSearchPhone.length >= 6 && !hasExistingPhone
+      allowManualEntry &&
+      sourceFilter !== 'conversation' &&
+      normalizedSearchPhone.length >= 6 &&
+      !hasExistingPhone
         ? {
             id: `manual:${normalizedSearchPhone}`,
             source: 'contact' as const,
@@ -140,8 +155,8 @@ export function ConversationTargetPickerDialog({
           }
         : null;
 
-    return manualTarget ? [manualTarget, ...targets] : targets;
-  }, [search, targets]);
+    return manualTarget ? [manualTarget, ...filteredTargets] : filteredTargets;
+  }, [allowManualEntry, search, sourceFilter, targets]);
 
   const selectedTargetIds = useMemo(
     () => selectedTargetsState.map((target) => target.id),

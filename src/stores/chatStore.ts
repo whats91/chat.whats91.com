@@ -8,7 +8,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Conversation, Message, SendMessageRequest } from '@/lib/types/chat';
-import { fetchConversations, fetchConversation, sendMessage as apiSendMessage } from '@/lib/api/client';
+import {
+  clearConversation as apiClearConversation,
+  deleteConversation as apiDeleteConversation,
+  fetchConversations,
+  fetchConversation,
+  sendMessage as apiSendMessage,
+} from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { mockLabels } from '@/lib/mock/data';
 
@@ -87,7 +93,8 @@ interface ChatState {
   pinConversation: (id: string) => void;
   archiveConversation: (id: string) => void;
   muteConversation: (id: string) => void;
-  deleteConversation: (id: string) => void;
+  clearConversation: (id: string) => Promise<void>;
+  deleteConversation: (id: string) => Promise<void>;
   
   // Real-time updates
   handleNewMessage: (data: { conversationId: string | number; message: Message }) => void;
@@ -170,7 +177,11 @@ export const useChatStore = create<ChatState>()(
               status: conv.status,
               metaData: null,
               createdAt: new Date(),
-              updatedAt: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
+              updatedAt: conv.lastMessageAt
+                ? new Date(conv.lastMessageAt)
+                : conv.updatedAt
+                  ? new Date(conv.updatedAt)
+                  : new Date(),
             }));
             
             set({
@@ -407,9 +418,51 @@ export const useChatStore = create<ChatState>()(
         }));
       },
       
-      deleteConversation: (id) => {
+      clearConversation: async (id) => {
+        const response = await apiClearConversation(id);
+
+        if (!response.success) {
+          throw new Error(response.message || 'Failed to clear chat');
+        }
+
+        set((state) => {
+          const newMap = new Map(state.messagesByConversation);
+          newMap.set(id, []);
+
+          return {
+            messagesByConversation: newMap,
+            conversations: state.conversations.map((conv) =>
+              conv.id === id
+                ? {
+                    ...conv,
+                    lastMessageId: null,
+                    lastMessageContent: null,
+                    lastMessageType: null,
+                    lastMessageAt: null,
+                    lastMessageDirection: null,
+                    lastMessage: undefined,
+                    unreadCount: 0,
+                    totalMessages: 0,
+                    updatedAt: new Date(),
+                  }
+                : conv
+            ),
+          };
+        });
+      },
+
+      deleteConversation: async (id) => {
+        const response = await apiDeleteConversation(id);
+
+        if (!response.success) {
+          throw new Error(response.message || 'Failed to delete conversation');
+        }
+
         set((state) => ({
           conversations: state.conversations.filter(conv => conv.id !== id),
+          messagesByConversation: new Map(
+            Array.from(state.messagesByConversation.entries()).filter(([conversationId]) => conversationId !== id)
+          ),
           selectedConversationId: state.selectedConversationId === id ? null : state.selectedConversationId,
         }));
       },

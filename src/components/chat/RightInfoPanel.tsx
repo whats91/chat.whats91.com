@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -18,6 +20,7 @@ import {
   Archive,
   Ban,
   Trash2,
+  Eraser,
   Flag,
   Search,
   ChevronDown,
@@ -38,14 +41,20 @@ interface RightInfoPanelProps {
 export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps) {
   const { conversations, labels, toggleRightPanel } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
+  const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   
   if (!conversation) {
     return null;
   }
   
   const { participant } = conversation;
+  const conversationLabels = (conversation as Conversation & { labels?: string[] }).labels || [];
+  const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
+  const participantPhone = participant?.phone || conversation.contactPhone;
+  const participantAvatar = participant?.avatar;
+  const participantEmail = participant?.email;
   
-  const initials = participant.name
+  const initials = participantName
     .split(' ')
     .map(n => n[0])
     .join('')
@@ -58,15 +67,15 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
         {/* Header */}
         <div className="p-6 text-center">
           <Avatar className="h-24 w-24 mx-auto mb-4">
-            <AvatarImage src={participant.avatar} alt={participant.name} />
+            <AvatarImage src={participantAvatar} alt={participantName} />
             <AvatarFallback className="bg-primary/20 text-primary text-2xl font-medium">
               {initials}
             </AvatarFallback>
           </Avatar>
-          <h2 className="text-lg font-semibold">{participant.name}</h2>
-          <p className="text-sm text-muted-foreground">{participant.phone}</p>
-          {participant.email && (
-            <p className="text-sm text-muted-foreground">{participant.email}</p>
+          <h2 className="text-lg font-semibold">{participantName}</h2>
+          <p className="text-sm text-muted-foreground">{participantPhone}</p>
+          {participantEmail && (
+            <p className="text-sm text-muted-foreground">{participantEmail}</p>
           )}
         </div>
         
@@ -90,12 +99,12 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
         <Separator />
         
         {/* Labels */}
-        {conversation.labels.length > 0 && (
+        {conversationLabels.length > 0 && (
           <>
             <div className="p-4">
               <h3 className="text-sm font-medium mb-2">Labels</h3>
               <div className="flex flex-wrap gap-2">
-                {conversation.labels.map((labelId, index) => {
+                {conversationLabels.map((labelId, index) => {
                   const label = labels.find(l => l.id === labelId || l.name === labelId);
                   return label ? (
                     <Badge key={label.id || index} variant="outline" className="gap-1">
@@ -169,12 +178,34 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
             <Flag className="h-5 w-5" />
             <span className="text-sm">Report contact</span>
           </button>
-          <button className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2">
+          <button
+            className="flex items-center gap-3 w-full text-left hover:bg-muted/50 rounded-lg p-2 -mx-2"
+            onClick={() => setDangerAction('clear')}
+          >
+            <Eraser className="h-5 w-5" />
+            <span className="text-sm">Clear chat</span>
+          </button>
+          <button
+            className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2"
+            onClick={() => setDangerAction('delete')}
+          >
             <Trash2 className="h-5 w-5" />
-            <span className="text-sm">Delete chat</span>
+            <span className="text-sm">Delete conversation</span>
           </button>
         </div>
       </ScrollArea>
+
+      <ConversationDangerDialog
+        open={dangerAction !== null}
+        action={dangerAction}
+        conversationId={conversation.id}
+        conversationName={participantName}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDangerAction(null);
+          }
+        }}
+      />
     </div>
   );
 }
