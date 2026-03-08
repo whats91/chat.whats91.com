@@ -31,6 +31,12 @@ import {
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
 import { findCloudApiSetupByUserAndPhoneNumberId } from '../db/cloud-api-setup';
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
+import { buildConversationMediaProxyUrl, MEDIA_MESSAGE_TYPES } from '@/lib/media/conversation-media';
+import {
+  cleanupPendingConversationMediaUpload,
+  finalizePendingConversationMediaUpload,
+  resolvePendingConversationMediaUpload,
+} from '@/server/media/conversation-media-service';
 import { Logger } from '@/lib/logger';
 
 const log = new Logger('ConversationCtrl');
@@ -103,6 +109,10 @@ function toSafeNumber(value: unknown): number {
   }
 
   return 0;
+}
+
+function isMediaMessageType(value: string | null | undefined): boolean {
+  return Boolean(value && MEDIA_MESSAGE_TYPES.has(value));
 }
 
 // ========================================
@@ -390,7 +400,15 @@ export async function sendMessage({
   userId,
   messageData,
 }: SendMessageParams) {
+  let pendingUploadToken: string | null = null;
+  let acceptedWhatsappMessageId: string | null = null;
+
   try {
+    let mediaUrlForMeta = messageData.mediaUrl || null;
+    let persistedMediaUrl = messageData.mediaUrl || null;
+    let resolvedMediaMimeType: string | null = null;
+    let resolvedMediaFilename: string | null = null;
+
     // Get conversation
     const [conversation] = await queryConversationsDb<any>(
       `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
@@ -418,6 +436,27 @@ export async function sendMessage({
         data: null,
       };
     }
+
+    if (messageData.mediaUploadToken) {
+      const pendingUpload = await resolvePendingConversationMediaUpload({
+        userId,
+        uploadToken: messageData.mediaUploadToken,
+      });
+
+      if (!pendingUpload.success || !pendingUpload.signedUrl) {
+        return {
+          success: false,
+          message: pendingUpload.message,
+          data: null,
+        };
+      }
+
+      pendingUploadToken = messageData.mediaUploadToken;
+      mediaUrlForMeta = pendingUpload.signedUrl;
+      persistedMediaUrl = buildConversationMediaProxyUrl(messageData.mediaUploadToken);
+      resolvedMediaMimeType = pendingUpload.mimeType || null;
+      resolvedMediaFilename = pendingUpload.originalFilename || null;
+    }
     
     // Build message payload
     let messagePayload: any = {
@@ -434,25 +473,25 @@ export async function sendMessage({
         break;
       case 'image':
         messagePayload.image = {
-          link: messageData.mediaUrl,
+          link: mediaUrlForMeta,
           caption: messageData.mediaCaption,
         };
         break;
       case 'video':
         messagePayload.video = {
-          link: messageData.mediaUrl,
+          link: mediaUrlForMeta,
           caption: messageData.mediaCaption,
         };
         break;
       case 'document':
         messagePayload.document = {
-          link: messageData.mediaUrl,
+          link: mediaUrlForMeta,
           caption: messageData.mediaCaption,
-          filename: messageData.messageContent,
+          filename: resolvedMediaFilename || messageData.messageContent,
         };
         break;
       case 'audio':
-        messagePayload.audio = { link: messageData.mediaUrl };
+        messagePayload.audio = { link: mediaUrlForMeta };
         break;
       case 'template':
         messagePayload.template = {
@@ -481,12 +520,21 @@ export async function sendMessage({
     });
     
     if (!sendResult.success) {
+      if (pendingUploadToken) {
+        await cleanupPendingConversationMediaUpload({
+          userId,
+          uploadToken: pendingUploadToken,
+        });
+      }
+
       return {
         success: false,
         message: sendResult.error || 'Failed to send message',
         data: { errorCode: sendResult.errorCode },
       };
     }
+
+    acceptedWhatsappMessageId = sendResult.messageId || null;
     
     // Create message record
     const messageTimestamp = new Date();
@@ -504,9 +552,9 @@ export async function sendMessage({
         'outbound',
         messageData.messageType,
         messageData.messageContent,
-        messageData.mediaUrl,
-        null,
-        messageData.messageContent,
+        pendingUploadToken ? null : persistedMediaUrl,
+        resolvedMediaMimeType,
+        resolvedMediaFilename || messageData.messageContent,
         messageData.mediaCaption,
         mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
         messageTimestamp,
@@ -519,6 +567,33 @@ export async function sendMessage({
       `SELECT * FROM conversation_messages WHERE whatsapp_message_id = ?`,
       [sendResult.messageId]
     );
+
+    if (pendingUploadToken && newMessage) {
+      const finalMediaUrl = buildConversationMediaProxyUrl(newMessage.id);
+
+      await finalizePendingConversationMediaUpload({
+        userId,
+        uploadToken: pendingUploadToken,
+        finalMessageId: String(newMessage.id),
+      });
+
+      await executeConversationsDb(
+        `UPDATE conversation_messages
+         SET media_url = ?, media_mime_type = ?, media_filename = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          finalMediaUrl,
+          resolvedMediaMimeType,
+          resolvedMediaFilename || messageData.messageContent || null,
+          newMessage.id,
+        ]
+      );
+
+      newMessage.media_url = finalMediaUrl;
+      newMessage.media_mime_type = resolvedMediaMimeType;
+      newMessage.media_filename = resolvedMediaFilename || messageData.messageContent || null;
+      persistedMediaUrl = finalMediaUrl;
+    }
     
     // Update conversation
     await executeConversationsDb(
@@ -573,9 +648,9 @@ export async function sendMessage({
           direction: 'outbound',
           messageType: messageData.messageType,
           messageContent: messageData.messageContent,
-          mediaUrl: messageData.mediaUrl ? `/api/conversations/media/${newMessage.id}` : null,
-          mediaMimeType: null,
-          mediaFilename: messageData.messageContent,
+          mediaUrl: persistedMediaUrl,
+          mediaMimeType: resolvedMediaMimeType,
+          mediaFilename: resolvedMediaFilename || messageData.messageContent || null,
           mediaCaption: messageData.mediaCaption,
           status: mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
         },
@@ -584,6 +659,20 @@ export async function sendMessage({
       },
     };
   } catch (error) {
+    if (messageData.mediaUploadToken && !acceptedWhatsappMessageId) {
+      try {
+        await cleanupPendingConversationMediaUpload({
+          userId,
+          uploadToken: messageData.mediaUploadToken,
+        });
+      } catch (cleanupError) {
+        log.warn('Failed to clean up pending media upload', {
+          error: cleanupError instanceof Error ? cleanupError.message : cleanupError,
+          uploadToken: messageData.mediaUploadToken,
+        });
+      }
+    }
+
     log.error('sendMessage error', { error: error instanceof Error ? error.message : error });
     return {
       success: false,
@@ -738,7 +827,16 @@ export interface IncomingMessageData {
 
 export async function processIncomingMessage(data: IncomingMessageData) {
   try {
-    const { userId, phoneNumberId, fromPhone, whatsappMessageId, messageType, messageContent, incomingPayload } = data;
+    const {
+      userId,
+      phoneNumberId,
+      fromPhone,
+      whatsappMessageId,
+      messageType,
+      messageContent,
+      mediaMimeType,
+      incomingPayload,
+    } = data;
     
     // Normalize phone
     const normalizedPhone = normalizeConversationPhone(fromPhone);
@@ -780,9 +878,9 @@ export async function processIncomingMessage(data: IncomingMessageData) {
     const messageTimestamp = new Date();
     await executeConversationsDb(
       `INSERT INTO conversation_messages 
-       (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
-        message_type, message_content, status, timestamp, incoming_payload, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, datetime('now'), datetime('now'))`,
+       (conversation_id, whatsapp_message_id, from_phone, to_phone, direction,
+        message_type, message_content, media_mime_type, status, timestamp, incoming_payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, datetime('now'), datetime('now'))`,
       [
         conversation.id,
         whatsappMessageId,
@@ -791,10 +889,40 @@ export async function processIncomingMessage(data: IncomingMessageData) {
         'inbound',
         messageType,
         messageContent,
+        mediaMimeType || null,
         messageTimestamp,
         JSON.stringify(incomingPayload),
       ]
     );
+
+    const [storedMessage] = await queryConversationsDb<any>(
+      `SELECT * FROM conversation_messages WHERE whatsapp_message_id = ? LIMIT 1`,
+      [whatsappMessageId]
+    );
+
+    if (!storedMessage) {
+      return { success: false, message: 'Stored message could not be reloaded' };
+    }
+
+    if (isMediaMessageType(messageType)) {
+      const inboundFilename = messageType === 'document' ? messageContent || null : null;
+
+      await executeConversationsDb(
+        `UPDATE conversation_messages
+         SET media_url = ?, media_mime_type = ?, media_filename = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          buildConversationMediaProxyUrl(storedMessage.id),
+          mediaMimeType || null,
+          inboundFilename,
+          storedMessage.id,
+        ]
+      );
+
+      storedMessage.media_url = buildConversationMediaProxyUrl(storedMessage.id);
+      storedMessage.media_mime_type = mediaMimeType || null;
+      storedMessage.media_filename = inboundFilename;
+    }
     
     // Update conversation
     await executeConversationsDb(
@@ -823,13 +951,16 @@ export async function processIncomingMessage(data: IncomingMessageData) {
       contactPhone: normalizedPhone,
       contactName: conversation.contact_name,
     }, {
-      id: 0, // Will be updated
+      id: storedMessage.id,
       whatsappMessageId,
       direction: 'inbound',
       messageType,
       messageContent: messageContent || null,
       status: 'delivered',
       timestamp: messageTimestamp,
+      mediaUrl: storedMessage.media_url || null,
+      mediaMimeType: storedMessage.media_mime_type || null,
+      mediaFilename: storedMessage.media_filename || null,
       incomingPayload: incomingPayload || null,
     });
     

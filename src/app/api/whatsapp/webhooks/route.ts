@@ -6,6 +6,11 @@ import { Logger } from '@/lib/logger';
 
 const log = new Logger('Webhook');
 
+interface WebhookPayload {
+  object?: string;
+  entry?: WebhookEntry[];
+}
+
 /**
  * WhatsApp Webhook Route Handler
  * 
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest) {
     // const appSecret = process.env.WHATSAPP_APP_SECRET;
     
     // Parse the request body
-    const body: WebhookEntry = await request.json();
+    const body = await request.json() as WebhookPayload;
     
     // Validate webhook structure
     if (body.object !== 'whatsapp_business_account') {
@@ -84,6 +89,14 @@ export async function POST(request: NextRequest) {
         if (value.messages) {
           for (const message of value.messages) {
             const messageType = message.type || 'text';
+            const sticker = message as typeof message & {
+              sticker?: { id?: string; mime_type?: string };
+            };
+            const interactive = message.interactive as {
+              button_reply?: { title?: string };
+              list_reply?: { title?: string };
+            } | undefined;
+            const button = message.button as { text?: string } | undefined;
             
             // Extract message content based on type
             let messageContent: string | undefined;
@@ -109,6 +122,11 @@ export async function POST(request: NextRequest) {
                 mediaId = message.audio?.id;
                 mediaMimeType = message.audio?.mime_type;
                 break;
+              case 'sticker':
+                messageContent = '[Sticker]';
+                mediaId = sticker.sticker?.id;
+                mediaMimeType = sticker.sticker?.mime_type;
+                break;
               case 'document':
                 messageContent = message.document?.filename || '[Document]';
                 mediaId = message.document?.id;
@@ -119,10 +137,9 @@ export async function POST(request: NextRequest) {
                 break;
               case 'contacts':
                 const contact = message.contacts?.[0];
-                messageContent = contact?.name?.formatted_name || '[Contact]';
+                messageContent = contact?.name?.formattedName || '[Contact]';
                 break;
               case 'interactive':
-                const interactive = message.interactive;
                 if (interactive?.button_reply) {
                   messageContent = interactive.button_reply.title;
                 } else if (interactive?.list_reply) {
@@ -132,7 +149,7 @@ export async function POST(request: NextRequest) {
                 }
                 break;
               case 'button':
-                messageContent = message.button?.text || '[Button]';
+                messageContent = button?.text || '[Button]';
                 break;
               case 'reaction':
                 messageContent = `👍 Reacted to a message`;

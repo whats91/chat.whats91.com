@@ -1,5 +1,6 @@
 'use client';
 
+import { buildConversationMediaProxyUrl, isMetaProtectedMediaUrl, isRenderableMediaUrl } from '@/lib/media/conversation-media';
 import type { ContactData, LocationData, Message, MessageType } from '@/lib/types/chat';
 
 type JsonObject = Record<string, unknown>;
@@ -228,6 +229,22 @@ function applyMediaPayload(
   }
 }
 
+function shouldUseMediaProxy(message: Message, normalized: RenderableMessage): boolean {
+  if (!message.id) {
+    return false;
+  }
+
+  if (!['image', 'video', 'audio', 'document', 'sticker'].includes(normalized.type)) {
+    return false;
+  }
+
+  if (!normalized.mediaUrl) {
+    return true;
+  }
+
+  return isMetaProtectedMediaUrl(normalized.mediaUrl) || !isRenderableMediaUrl(normalized.mediaUrl);
+}
+
 export function resolveMessageForRendering(message: Message): RenderableMessage {
   const normalized: RenderableMessage = {
     type: normalizeMessageType(message.type),
@@ -375,6 +392,10 @@ export function resolveMessageForRendering(message: Message): RenderableMessage 
 
     default:
       break;
+  }
+
+  if (shouldUseMediaProxy(message, normalized)) {
+    normalized.mediaUrl = buildConversationMediaProxyUrl(message.id);
   }
 
   return normalized;

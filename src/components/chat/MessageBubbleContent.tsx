@@ -368,7 +368,9 @@ function ContactContent({
     <div className="space-y-2">
       {contacts.slice(0, 2).map((contact, index) => {
         const phones = Array.isArray(contact.phones) ? contact.phones : [];
-        const legacyName = isObject(contact.name) ? getString(contact.name.formatted_name) : null;
+        const legacyName = isObject(contact.name)
+          ? getString((contact.name as JsonObject).formatted_name)
+          : null;
         const displayName =
           contact.name?.formattedName ||
           legacyName ||
