@@ -117,6 +117,38 @@ function isMediaMessageType(value: string | null | undefined): boolean {
   return Boolean(value && MEDIA_MESSAGE_TYPES.has(value));
 }
 
+function mapConversationMessageRowToMessage(msg: any): Message {
+  return {
+    id: String(msg.id),
+    conversationId: String(msg.conversation_id),
+    whatsappMessageId: msg.whatsapp_message_id,
+    senderId: msg.direction === 'inbound' ? msg.from_phone : msg.to_phone,
+    fromPhone: msg.from_phone,
+    toPhone: msg.to_phone,
+    direction: msg.direction,
+    type: msg.message_type,
+    content: msg.message_content,
+    status: msg.status,
+    timestamp: msg.timestamp,
+    replyTo: msg.replied_to_message_id,
+    mediaUrl: msg.media_url,
+    mediaMimeType: msg.media_mime_type,
+    mediaFilename: msg.media_filename,
+    mediaCaption: msg.media_caption,
+    interactiveData: msg.interactive_data,
+    locationData: msg.location_data,
+    contactData: msg.contact_data,
+    incomingPayload: msg.incoming_payload,
+    outgoingPayload: msg.outgoing_payload,
+    webhookData: msg.webhook_data,
+    errorMessage: msg.error_message,
+    isRead: msg.is_read || false,
+    isPinned: msg.is_pinned || false,
+    isStarred: msg.is_starred || false,
+    readAt: msg.read_at,
+  };
+}
+
 // ========================================
 // CONVERSATION LIST
 // ========================================
@@ -603,35 +635,7 @@ export async function getConversationById({
     const totalMessages = toSafeNumber(countResult?.total);
     
     // Format messages
-    const formattedMessages: Message[] = messages.map(msg => ({
-      id: String(msg.id),
-      conversationId: String(msg.conversation_id),
-      whatsappMessageId: msg.whatsapp_message_id,
-      senderId: msg.direction === 'inbound' ? msg.from_phone : msg.to_phone,
-      fromPhone: msg.from_phone,
-      toPhone: msg.to_phone,
-      direction: msg.direction,
-      type: msg.message_type,
-      content: msg.message_content,
-      status: msg.status,
-      timestamp: msg.timestamp,
-      replyTo: msg.replied_to_message_id,
-      mediaUrl: msg.media_url,
-      mediaMimeType: msg.media_mime_type,
-      mediaFilename: msg.media_filename,
-      mediaCaption: msg.media_caption,
-      interactiveData: msg.interactive_data,
-      locationData: msg.location_data,
-      contactData: msg.contact_data,
-      incomingPayload: msg.incoming_payload,
-      outgoingPayload: msg.outgoing_payload,
-      webhookData: msg.webhook_data,
-      errorMessage: msg.error_message,
-      isRead: msg.is_read || false,
-      isPinned: msg.is_pinned || false,
-      isStarred: msg.is_starred || false,
-      readAt: msg.read_at,
-    }));
+    const formattedMessages: Message[] = messages.map(mapConversationMessageRowToMessage);
     
     // Mark as read and clear unread count
     await executeConversationsDb(
@@ -663,6 +667,69 @@ export async function getConversationById({
     return {
       success: false,
       message: 'Failed to retrieve conversation',
+      data: null,
+    };
+  }
+}
+
+export async function getPinnedMessage(conversationId: number, userId: string) {
+  try {
+    const [message] = await queryConversationsDb<any>(
+      `SELECT cm.*
+       FROM conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       WHERE cm.conversation_id = ? AND c.user_id = ? AND cm.is_pinned = true
+       ORDER BY cm.updated_at DESC, cm.timestamp DESC, cm.id DESC
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: 'Pinned message retrieved successfully',
+      data: {
+        message: message ? mapConversationMessageRowToMessage(message) : null,
+      },
+    };
+  } catch (error) {
+    log.error('getPinnedMessage error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to retrieve pinned message',
+      data: null,
+    };
+  }
+}
+
+export async function getStarredMessages(
+  conversationId: number,
+  userId: string,
+  limit = 100
+) {
+  try {
+    const safeLimit = Math.min(Math.max(limit, 1), 250);
+    const messages = await queryConversationsDb<any>(
+      `SELECT cm.*
+       FROM conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       WHERE cm.conversation_id = ? AND c.user_id = ? AND cm.is_starred = true
+       ORDER BY cm.timestamp DESC, cm.id DESC
+       LIMIT ?`,
+      [conversationId, userId, safeLimit]
+    );
+
+    return {
+      success: true,
+      message: 'Starred messages retrieved successfully',
+      data: {
+        messages: messages.map(mapConversationMessageRowToMessage),
+      },
+    };
+  } catch (error) {
+    log.error('getStarredMessages error', { error: error instanceof Error ? error.message : error });
+    return {
+      success: false,
+      message: 'Failed to retrieve starred messages',
       data: null,
     };
   }
@@ -1439,6 +1506,16 @@ async function toggleMessageFlag({
 
     const nextValue = !Boolean(message.currentValue);
 
+    if (column === 'is_pinned' && nextValue) {
+      await executeConversationsDb(
+        `UPDATE conversation_messages cm
+         INNER JOIN conversations c ON c.id = cm.conversation_id
+         SET cm.is_pinned = false, cm.updated_at = CURRENT_TIMESTAMP
+         WHERE cm.conversation_id = ? AND c.user_id = ?`,
+        [conversationId, userId]
+      );
+    }
+
     await executeConversationsDb(
       `UPDATE conversation_messages cm
        INNER JOIN conversations c ON c.id = cm.conversation_id
@@ -1544,6 +1621,8 @@ export const conversationController = {
   getConversationTargets,
   startConversation,
   getConversationById,
+  getPinnedMessage,
+  getStarredMessages,
   sendMessage,
   markAsRead: markConversationAsRead,
   toggleArchive: toggleArchiveConversation,

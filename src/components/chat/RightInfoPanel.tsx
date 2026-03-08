@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
+import { StarredMessagesDialog } from '@/components/chat/StarredMessagesDialog';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -42,6 +43,7 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
   const { conversations, labels, muteConversation, toggleRightPanel } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
+  const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
   
   if (!conversation) {
     return null;
@@ -139,7 +141,10 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
         <Separator />
         
         {/* Starred Messages */}
-        <button className="flex items-center gap-3 p-4 w-full text-left hover:bg-muted/50">
+        <button
+          className="flex items-center gap-3 p-4 w-full text-left hover:bg-muted/50"
+          onClick={() => setIsStarredDialogOpen(true)}
+        >
           <Star className="h-5 w-5 text-muted-foreground" />
           <span className="text-sm">Starred messages</span>
         </button>
@@ -210,6 +215,13 @@ export function RightInfoPanel({ conversationId, onClose }: RightInfoPanelProps)
             setDangerAction(null);
           }
         }}
+      />
+
+      <StarredMessagesDialog
+        open={isStarredDialogOpen}
+        onOpenChange={setIsStarredDialogOpen}
+        conversationId={conversation.id}
+        conversationName={participantName}
       />
     </div>
   );

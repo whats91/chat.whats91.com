@@ -388,6 +388,22 @@ export interface ConversationDetailResponse {
   };
 }
 
+export interface PinnedMessageResponse {
+  success: boolean;
+  message: string;
+  data: {
+    message: Message | null;
+  } | null;
+}
+
+export interface StarredMessagesResponse {
+  success: boolean;
+  message: string;
+  data: {
+    messages: Message[];
+  } | null;
+}
+
 export interface ConversationTarget {
   id: string;
   source: 'conversation' | 'contact';

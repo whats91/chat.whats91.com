@@ -653,12 +653,15 @@ export const useChatStore = create<ChatState>()(
         set((state) => {
           const newMap = new Map(state.messagesByConversation);
           const messages = newMap.get(conversationId) || [];
+          const nextPinnedState = response.data?.isPinned ?? !messages.find((message) => message.id === messageId)?.isPinned;
           newMap.set(
             conversationId,
             messages.map((message) =>
-              message.id === messageId
-                ? { ...message, isPinned: response.data?.isPinned ?? !message.isPinned }
-                : message
+              nextPinnedState
+                ? { ...message, isPinned: message.id === messageId }
+                : message.id === messageId
+                  ? { ...message, isPinned: false }
+                  : message
             )
           );
 

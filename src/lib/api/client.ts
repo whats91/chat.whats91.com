@@ -7,6 +7,8 @@
 import type { 
   ConversationListResponse, 
   ConversationDetailResponse,
+  PinnedMessageResponse,
+  StarredMessagesResponse,
   ConversationTargetListResponse,
   SendMessageRequest,
   SendMessageResponse,
@@ -77,6 +79,33 @@ export async function fetchConversation(
     headers: getHeaders(),
   });
   
+  return response.json();
+}
+
+export async function fetchPinnedMessage(
+  conversationId: string | number
+): Promise<PinnedMessageResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/messages/pinned`, {
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+export async function fetchStarredMessages(
+  conversationId: string | number,
+  params: { limit?: number } = {}
+): Promise<StarredMessagesResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.limit) searchParams.set('limit', String(params.limit));
+
+  const response = await fetch(
+    `${API_BASE}/conversations/${conversationId}/messages/starred?${searchParams.toString()}`,
+    {
+      headers: getHeaders(),
+    }
+  );
+
   return response.json();
 }
 
@@ -253,6 +282,8 @@ export const api = {
   conversations: {
     list: fetchConversations,
     get: fetchConversation,
+    getPinnedMessage: fetchPinnedMessage,
+    getStarredMessages: fetchStarredMessages,
     sendMessage,
     fetchConversationTargets,
     startConversation,

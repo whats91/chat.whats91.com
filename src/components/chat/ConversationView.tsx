@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
-import { sendMessage as sendConversationMessage } from '@/lib/api/client';
+import { fetchPinnedMessage, sendMessage as sendConversationMessage } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
@@ -97,6 +97,26 @@ function getSearchableMessageText(message: Message): string {
     .toLowerCase();
 }
 
+function normalizeMessageDates(message: Message): Message {
+  return {
+    ...message,
+    timestamp: message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp),
+    readAt: message.readAt ? new Date(message.readAt) : null,
+  };
+}
+
+function getConversationMessagePreview(message: Message): string {
+  const resolved = resolveMessageForRendering(message);
+
+  return (
+    resolved.content ||
+    resolved.mediaCaption ||
+    resolved.mediaFilename ||
+    resolved.locationData?.name ||
+    `[${resolved.type}]`
+  );
+}
+
 function compareMessageTimeline(left: Message, right: Message): number {
   const timestampDiff = new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
   if (timestampDiff !== 0) {
@@ -129,12 +149,14 @@ export function ConversationView({
     toggleRightPanel,
     isRightPanelOpen,
   } = useChatStore();
+  const conversationRootRef = useRef<HTMLDivElement | null>(null);
   const [viewerMessage, setViewerMessage] = useState<Message | null>(null);
   const [isForwardPickerOpen, setIsForwardPickerOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
+  const [remotePinnedMessage, setRemotePinnedMessage] = useState<Message | null>(null);
   
   const conversation = conversations.find(c => c.id === conversationId);
   const messages = [...getMessages(conversationId)].sort(compareMessageTimeline);
@@ -152,6 +174,14 @@ export function ConversationView({
     activeSearchMatchIndex >= 0 && activeSearchMatchIndex < searchMatches.length
       ? searchMatches[activeSearchMatchIndex]?.id || null
       : null;
+  const pinnedMessageFromLoadedMessages = useMemo(
+    () => messages.find((message) => message.isPinned) || null,
+    [messages]
+  );
+  const pinnedMessage = pinnedMessageFromLoadedMessages || remotePinnedMessage;
+  const isPinnedMessageLoaded = Boolean(
+    pinnedMessage && messages.some((message) => message.id === pinnedMessage.id)
+  );
 
   useEffect(() => {
     if (!isSearchOpen) {
@@ -175,6 +205,49 @@ export function ConversationView({
     });
   }, [normalizedSearchQuery, searchMatches.length]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPinnedMessage = async () => {
+      try {
+        const response = await fetchPinnedMessage(conversationId);
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.success || !response.data?.message) {
+          setRemotePinnedMessage(null);
+          return;
+        }
+
+        setRemotePinnedMessage(normalizeMessageDates(response.data.message));
+      } catch {
+        if (!cancelled) {
+          setRemotePinnedMessage(null);
+        }
+      }
+    };
+
+    void loadPinnedMessage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!remotePinnedMessage) {
+      return;
+    }
+
+    const loadedMatch = messages.find((message) => message.id === remotePinnedMessage.id);
+    if (!loadedMatch) {
+      return;
+    }
+
+    setRemotePinnedMessage(loadedMatch.isPinned ? loadedMatch : null);
+  }, [messages, remotePinnedMessage]);
+
   const navigateSearch = (direction: 'up' | 'down') => {
     if (searchMatches.length === 0) {
       return;
@@ -191,6 +264,17 @@ export function ConversationView({
 
       return currentIndex === searchMatches.length - 1 ? 0 : currentIndex + 1;
     });
+  };
+
+  const scrollToMessage = (messageId: string) => {
+    const root = conversationRootRef.current;
+    if (!root) {
+      return;
+    }
+
+    const escapedId = messageId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const target = root.querySelector<HTMLElement>(`[data-message-id="${escapedId}"]`);
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
 
   const handleForwardConfirm = async (targets: ConversationTarget[]) => {
@@ -275,7 +359,7 @@ export function ConversationView({
   }
   
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div ref={conversationRootRef} className="flex flex-col h-full bg-background">
       {/* Header */}
       <ConversationHeader
         conversation={conversation}
@@ -307,6 +391,14 @@ export function ConversationView({
           onNavigateUp={() => navigateSearch('up')}
           onNavigateDown={() => navigateSearch('down')}
           onClose={() => setIsSearchOpen(false)}
+        />
+      ) : null}
+
+      {pinnedMessage ? (
+        <PinnedMessageBanner
+          message={pinnedMessage}
+          isLoaded={isPinnedMessageLoaded}
+          onClick={() => scrollToMessage(pinnedMessage.id)}
         />
       ) : null}
       
@@ -365,6 +457,48 @@ export function ConversationView({
           }
         }}
       />
+    </div>
+  );
+}
+
+function PinnedMessageBanner({
+  message,
+  isLoaded,
+  onClick,
+}: {
+  message: Message;
+  isLoaded: boolean;
+  onClick: () => void;
+}) {
+  const preview = getConversationMessagePreview(message);
+
+  const content = (
+    <div className="flex min-w-0 items-start gap-3">
+      <div className="rounded-full bg-primary/10 p-2 text-primary">
+        <Pin className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-medium uppercase tracking-wide text-primary">Pinned Message</div>
+        <p className="truncate text-sm text-foreground">{preview}</p>
+      </div>
+      <div className="text-right">
+        <div className="text-xs text-muted-foreground">{formatTimeInIst(message.timestamp)}</div>
+        <div className="text-[11px] text-muted-foreground">
+          {isLoaded ? 'Jump to message' : 'Pinned in this chat'}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="border-b bg-background/95 px-3 py-2 backdrop-blur">
+      {isLoaded ? (
+        <button type="button" className="w-full text-left" onClick={onClick}>
+          {content}
+        </button>
+      ) : (
+        content
+      )}
     </div>
   );
 }
@@ -667,6 +801,7 @@ function MessageList({
             {group.messages.map((message, messageIndex) => (
               <div
                 key={message.id}
+                data-message-id={message.id}
                 ref={(node) => {
                   if (node) {
                     messageRefs.current.set(message.id, node);
