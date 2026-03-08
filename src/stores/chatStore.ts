@@ -53,6 +53,61 @@ function sortMessagesChronologically(messages: Message[]): Message[] {
   return [...messages].sort(compareMessages);
 }
 
+function deduplicateMessages(messages: Message[]): Message[] {
+  const messageMap = new Map<string, Message>();
+
+  for (const message of messages) {
+    const dedupeKey = message.whatsappMessageId
+      ? `wa:${message.whatsappMessageId}`
+      : `id:${message.id}`;
+    const previous = messageMap.get(dedupeKey);
+
+    if (!previous) {
+      messageMap.set(dedupeKey, message);
+      continue;
+    }
+
+    const previousIsTemp = String(previous.id).startsWith('temp-');
+    const currentIsTemp = String(message.id).startsWith('temp-');
+
+    if (previousIsTemp && !currentIsTemp) {
+      messageMap.set(dedupeKey, message);
+      continue;
+    }
+
+    if (!previousIsTemp && currentIsTemp) {
+      continue;
+    }
+
+    messageMap.set(dedupeKey, compareMessages(previous, message) <= 0 ? message : previous);
+  }
+
+  return sortMessagesChronologically(Array.from(messageMap.values()));
+}
+
+function findOptimisticMessageMatch(messages: Message[], incomingMessage: Message): Message | null {
+  if (incomingMessage.direction !== 'outbound') {
+    return null;
+  }
+
+  return (
+    [...messages]
+      .reverse()
+      .find((message) => {
+        if (!String(message.id).startsWith('temp-') || message.status !== 'pending') {
+          return false;
+        }
+
+        return (
+          message.direction === incomingMessage.direction &&
+          message.type === incomingMessage.type &&
+          message.content === incomingMessage.content &&
+          (message.mediaUrl || null) === (incomingMessage.mediaUrl || null)
+        );
+      }) || null
+  );
+}
+
 interface ConversationListQuery {
   search: string;
   archived: boolean;
@@ -497,8 +552,8 @@ export const useChatStore = create<ChatState>()(
             set((state) => {
               const newMap = new Map(state.messagesByConversation);
               const messages = newMap.get(conversationId) || [];
-              const updatedMessages = messages.map(m => 
-                m.id === tempId 
+              const updatedMessages = messages.map(m =>
+                m.id === tempId
                   ? {
                       ...m,
                       id: String(response.data!.message.id),
@@ -507,7 +562,7 @@ export const useChatStore = create<ChatState>()(
                     }
                   : m
               );
-              newMap.set(conversationId, sortMessagesChronologically(updatedMessages));
+              newMap.set(conversationId, deduplicateMessages(updatedMessages));
               return { messagesByConversation: newMap };
             });
           } else {
@@ -740,41 +795,90 @@ export const useChatStore = create<ChatState>()(
         const conversationKey = String(conversationId);
         
         set((state) => {
-          // Add message to conversation
+          const normalizedMessage: Message = {
+            ...message,
+            conversationId: conversationKey,
+            timestamp: toMessageDate(message.timestamp as Date | string),
+            isPinned: Boolean(message.isPinned),
+            isStarred: Boolean(message.isStarred),
+          };
+
           const newMap = new Map(state.messagesByConversation);
-          const messages = newMap.get(conversationKey) || [];
-          newMap.set(
-            conversationKey,
-            sortMessagesChronologically([
-              ...messages,
-              {
-                ...message,
-                conversationId: conversationKey,
-                timestamp: toMessageDate(message.timestamp as Date | string),
-                isPinned: Boolean(message.isPinned),
-                isStarred: Boolean(message.isStarred),
-              },
-            ])
-          );
-          
-          // Update conversation preview
-          const conversations = state.conversations.map(conv => {
-            if (conv.id === conversationKey) {
-              return {
-                ...conv,
-                lastMessage: {
-                  ...message,
-                  id: message.id,
-                  conversationId: conversationKey,
+          const existingMessages = newMap.get(conversationKey) || [];
+          const optimisticMatch = findOptimisticMessageMatch(existingMessages, normalizedMessage);
+          const nextMessages = optimisticMatch
+            ? existingMessages.map((existingMessage) =>
+                existingMessage.id === optimisticMatch.id ? normalizedMessage : existingMessage
+              )
+            : [...existingMessages, normalizedMessage];
+          newMap.set(conversationKey, deduplicateMessages(nextMessages));
+
+          const existingConversation = state.conversations.find((conversation) => conversation.id === conversationKey);
+          const nextConversation: Conversation = existingConversation
+            ? {
+                ...existingConversation,
+                lastMessageId: normalizedMessage.whatsappMessageId,
+                lastMessageContent: normalizedMessage.content,
+                lastMessageType: normalizedMessage.type,
+                lastMessageAt: normalizedMessage.timestamp,
+                lastMessageDirection: normalizedMessage.direction,
+                lastMessage: normalizedMessage,
+                totalMessages: Math.max(existingConversation.totalMessages + 1, newMap.get(conversationKey)?.length || 0),
+                unreadCount:
+                  normalizedMessage.direction === 'inbound' && state.selectedConversationId !== conversationKey
+                    ? existingConversation.unreadCount + 1
+                    : existingConversation.unreadCount,
+                updatedAt: normalizedMessage.timestamp,
+              }
+            : {
+                id: conversationKey,
+                userId: getCurrentUserId(),
+                contactPhone:
+                  normalizedMessage.direction === 'inbound'
+                    ? normalizedMessage.fromPhone
+                    : normalizedMessage.toPhone,
+                contactName: null,
+                whatsappPhoneNumberId: '',
+                lastMessageId: normalizedMessage.whatsappMessageId,
+                lastMessageContent: normalizedMessage.content,
+                lastMessageType: normalizedMessage.type,
+                lastMessageAt: normalizedMessage.timestamp,
+                lastMessageDirection: normalizedMessage.direction,
+                unreadCount: normalizedMessage.direction === 'inbound' ? 1 : 0,
+                totalMessages: newMap.get(conversationKey)?.length || 1,
+                isPinned: false,
+                isArchived: false,
+                isMuted: false,
+                isBlocked: false,
+                status: 'active',
+                metaData: null,
+                participant: {
+                  id: conversationKey,
+                  name:
+                    normalizedMessage.direction === 'inbound'
+                      ? normalizedMessage.fromPhone
+                      : normalizedMessage.toPhone,
+                  phone:
+                    normalizedMessage.direction === 'inbound'
+                      ? normalizedMessage.fromPhone
+                      : normalizedMessage.toPhone,
+                  status: 'offline',
                 },
-                updatedAt: message.timestamp,
-                unreadCount: conv.unreadCount + 1,
+                lastMessage: normalizedMessage,
+                createdAt: normalizedMessage.timestamp,
+                updatedAt: normalizedMessage.timestamp,
               };
-            }
-            return conv;
-          });
-          
-          return { messagesByConversation: newMap, conversations: sortConversations(conversations) };
+
+          const conversations = existingConversation
+            ? state.conversations.map((conversation) =>
+                conversation.id === conversationKey ? nextConversation : conversation
+              )
+            : [nextConversation, ...state.conversations];
+
+          return {
+            messagesByConversation: newMap,
+            conversations: sortConversations(conversations),
+          };
         });
       },
       

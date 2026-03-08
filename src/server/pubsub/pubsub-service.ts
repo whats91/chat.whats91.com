@@ -15,71 +15,18 @@
 import 'server-only';
 import { getRedisClient } from '../db/redis';
 import { Logger } from '@/lib/logger';
+import type {
+  PubSubConversationUpdateEvent as ConversationUpdateEvent,
+  PubSubEvent,
+  PubSubEventType,
+  PubSubNewMessageEvent as NewMessageEvent,
+  PubSubStatusUpdateEvent as StatusUpdateEvent,
+} from '@/lib/types/pubsub';
 
 const log = new Logger('PubSub');
 
-// Event types
-export type PubSubEventType = 'new_message' | 'status_update' | 'conversation_update';
-
-export interface PubSubEvent {
-  type: PubSubEventType;
-  timestamp: string;
-  data: Record<string, unknown>;
-}
-
-export interface NewMessageEvent extends PubSubEvent {
-  type: 'new_message';
-  data: {
-    conversation: {
-      id: number;
-      contactPhone: string;
-      contactName: string | null;
-    };
-    messageRecord: {
-      id: number;
-      whatsappMessageId: string;
-      direction: 'inbound' | 'outbound';
-      messageType: string;
-      messageContent: string | null;
-      status: string;
-      timestamp: string;
-      mediaUrl?: string | null;
-      mediaMimeType?: string | null;
-      mediaFilename?: string | null;
-      isPinned?: boolean;
-      isStarred?: boolean;
-      incomingPayload?: Record<string, unknown> | null;
-      outgoingPayload?: Record<string, unknown> | null;
-    };
-  };
-}
-
-export interface StatusUpdateEvent extends PubSubEvent {
-  type: 'status_update';
-  data: {
-    messageId: string;
-    conversationId: number;
-    status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
-    timestamp: string;
-    errorCode?: string;
-    errorMessage?: string;
-  };
-}
-
-export interface ConversationUpdateEvent extends PubSubEvent {
-  type: 'conversation_update';
-  data: {
-    conversationId: number;
-    userId: string;
-    updates: Record<string, unknown>;
-  };
-}
-
 // Callback type
 export type PubSubCallback = (event: PubSubEvent) => void;
-
-// In-memory subscriber storage for fallback
-const memorySubscribers = new Map<string, Set<PubSubCallback>>();
 
 /**
  * Get channel name for a user
@@ -99,22 +46,9 @@ export async function publishToUser(
     const channel = getChannelName(userId);
     const message = JSON.stringify(event);
     
-    // Try Redis first
     const redis = await getRedisClient();
     await redis.publish(channel, message);
-    
-    // Also handle in-memory subscribers
-    const callbacks = memorySubscribers.get(channel);
-    if (callbacks) {
-      callbacks.forEach(cb => {
-        try {
-          cb(event);
-        } catch (error) {
-          log.error('Callback error', { error });
-        }
-      });
-    }
-    
+
     log.info('Published event', { type: event.type, channel });
   } catch (error) {
     log.error('Publish error', { error });
@@ -129,39 +63,28 @@ export async function subscribeToUser(
   callback: PubSubCallback
 ): Promise<() => void> {
   const channel = getChannelName(userId);
-  
-  // Add to in-memory subscribers
-  if (!memorySubscribers.has(channel)) {
-    memorySubscribers.set(channel, new Set());
-  }
-  memorySubscribers.get(channel)!.add(callback);
-  
-  // Also subscribe via Redis
+  const redis = await getRedisClient();
+  const redisHandler = (message: string) => {
+    try {
+      const event = JSON.parse(message) as PubSubEvent;
+      log.debug('Received pubsub message', { type: event.type, channel });
+      callback(event);
+    } catch (error) {
+      log.error('Parse error', { error, channel });
+    }
+  };
+
   try {
-    const redis = await getRedisClient();
-    await redis.subscribe(channel, (message: string) => {
-      try {
-        const event = JSON.parse(message) as PubSubEvent;
-        log.debug('Received Redis message', { type: event.type });
-        callback(event);
-      } catch (error) {
-        log.error('Parse error', { error });
-      }
-    });
+    await redis.subscribe(channel, redisHandler);
   } catch (error) {
-    log.warn('Subscribe error, using in-memory fallback', { error });
+    log.warn('Subscribe error', { error, channel });
   }
   
   log.info('Subscribed to channel', { channel });
   
-  // Return unsubscribe function
-  return () => {
-    const callbacks = memorySubscribers.get(channel);
-    if (callbacks) {
-      callbacks.delete(callback);
-      if (callbacks.size === 0) {
-        memorySubscribers.delete(channel);
-      }
+  return async () => {
+    if (typeof redis.unsubscribe === 'function') {
+      await redis.unsubscribe(channel, redisHandler);
     }
     log.debug('Unsubscribed from channel', { channel });
   };

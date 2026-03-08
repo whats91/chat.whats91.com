@@ -1,0 +1,66 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
+import PubSubClient from '@/lib/pubsub/client';
+import type { PubSubClientPayload } from '@/lib/types/pubsub';
+
+interface UsePubSubOptions {
+  userId: string;
+  autoConnect?: boolean;
+  onMessage?: (payload: PubSubClientPayload) => void;
+  onConnectionChange?: (connected: boolean) => void;
+}
+
+export function usePubSub({
+  userId,
+  autoConnect = true,
+  onMessage,
+  onConnectionChange,
+}: UsePubSubOptions) {
+  const clientRef = useRef<PubSubClient | null>(null);
+  const messageHandlerRef = useRef<typeof onMessage>(onMessage);
+  const connectionHandlerRef = useRef<typeof onConnectionChange>(onConnectionChange);
+
+  useEffect(() => {
+    messageHandlerRef.current = onMessage;
+  }, [onMessage]);
+
+  useEffect(() => {
+    connectionHandlerRef.current = onConnectionChange;
+  }, [onConnectionChange]);
+
+  useEffect(() => {
+    if (!autoConnect || !userId) {
+      return;
+    }
+
+    const client = new PubSubClient();
+    clientRef.current = client;
+
+    const handleMessage = (payload: PubSubClientPayload) => {
+      messageHandlerRef.current?.(payload);
+    };
+    const handleConnectionChange = (connected: boolean) => {
+      connectionHandlerRef.current?.(connected);
+    };
+
+    client.onMessage(handleMessage);
+    client.onConnectionChange(handleConnectionChange);
+    client.connect();
+    client.subscribe(`conversations-${userId}`);
+
+    return () => {
+      client.offMessage(handleMessage);
+      client.offConnectionChange(handleConnectionChange);
+      client.disconnect();
+      clientRef.current = null;
+    };
+  }, [autoConnect, userId]);
+
+  return {
+    getStatus: () => clientRef.current?.getStatus() ?? null,
+    disconnect: () => clientRef.current?.disconnect(),
+  };
+}
+
+export default usePubSub;

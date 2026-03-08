@@ -41,6 +41,7 @@ export interface RedisClient {
   lrange(key: string, start: number, stop: number): Promise<string[]>;
   publish(channel: string, message: string): Promise<void>;
   subscribe(channel: string, callback: (message: string) => void): Promise<void>;
+  unsubscribe?(channel: string, callback?: (message: string) => void): Promise<void>;
   disconnect(): Promise<void>;
 }
 
@@ -306,6 +307,24 @@ class InMemoryRedis implements RedisClient {
       this.subscribers.set(fullChannel, new Set());
     }
     this.subscribers.get(fullChannel)!.add(callback);
+  }
+
+  async unsubscribe(channel: string, callback?: (message: string) => void): Promise<void> {
+    const fullChannel = this.getFullKey(channel);
+    if (!this.subscribers.has(fullChannel)) {
+      return;
+    }
+
+    if (!callback) {
+      this.subscribers.delete(fullChannel);
+      return;
+    }
+
+    const callbacks = this.subscribers.get(fullChannel)!;
+    callbacks.delete(callback);
+    if (callbacks.size === 0) {
+      this.subscribers.delete(fullChannel);
+    }
   }
   
   async disconnect(): Promise<void> {

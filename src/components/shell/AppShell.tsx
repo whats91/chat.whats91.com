@@ -1,12 +1,20 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
+import type { Message } from '@/lib/types/chat';
+import type {
+  PubSubClientPayload,
+  PubSubNewMessageEvent,
+  PubSubStatusUpdateEvent,
+} from '@/lib/types/pubsub';
 import { useChatStore, useShortcutsStore } from '@/stores/chatStore';
 import { ChatList } from '@/components/chat/ChatList';
 import { ConversationView } from '@/components/chat/ConversationView';
 import { RightInfoPanel } from '@/components/chat/RightInfoPanel';
 import { NewChatModal } from '@/components/chat/NewChatModal';
 import { VersionFooter } from '@/components/common/VersionFooter';
+import { getCurrentUserId } from '@/lib/config/current-user';
+import { usePubSub } from '@/hooks/use-pubsub';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -24,6 +32,35 @@ const SHORTCUTS = {
   deleteChat: { key: 'Backspace', ctrl: true, shift: false, description: 'Delete chat' },
 };
 
+function mapPubSubMessageToChatMessage(event: PubSubNewMessageEvent): Message {
+  const userId = getCurrentUserId();
+  const { conversation, messageRecord } = event.data;
+  const contactPhone = conversation.contactPhone;
+
+  return {
+    id: String(messageRecord.id),
+    conversationId: String(conversation.id),
+    whatsappMessageId: messageRecord.whatsappMessageId,
+    senderId: messageRecord.direction === 'inbound' ? contactPhone : userId,
+    fromPhone: messageRecord.direction === 'inbound' ? contactPhone : userId,
+    toPhone: messageRecord.direction === 'outbound' ? contactPhone : userId,
+    direction: messageRecord.direction,
+    content: messageRecord.messageContent,
+    type: messageRecord.messageType as Message['type'],
+    status: messageRecord.status as Message['status'],
+    timestamp: new Date(messageRecord.timestamp),
+    mediaUrl: messageRecord.mediaUrl || null,
+    mediaMimeType: messageRecord.mediaMimeType || null,
+    mediaFilename: messageRecord.mediaFilename || null,
+    incomingPayload: messageRecord.incomingPayload || null,
+    outgoingPayload: messageRecord.outgoingPayload || null,
+    errorMessage: null,
+    isRead: messageRecord.direction === 'outbound',
+    isPinned: Boolean(messageRecord.isPinned),
+    isStarred: Boolean(messageRecord.isStarred),
+  };
+}
+
 export function AppShell() {
   const {
     selectedConversationId,
@@ -32,8 +69,42 @@ export function AppShell() {
     selectConversation,
     isRightPanelOpen,
     conversations,
+    handleNewMessage,
+    handleStatusUpdate,
+    setSocketConnected,
   } = useChatStore();
   const isMobile = useIsMobile();
+  const currentUserId = getCurrentUserId();
+
+  const handlePubSubPayload = useCallback(
+    (payload: PubSubClientPayload) => {
+      if (payload.type === 'new_message') {
+        const event = payload as PubSubNewMessageEvent;
+        handleNewMessage({
+          conversationId: event.data.conversation.id,
+          message: mapPubSubMessageToChatMessage(event),
+        });
+        return;
+      }
+
+      if (payload.type === 'status_update') {
+        const event = payload as PubSubStatusUpdateEvent;
+        handleStatusUpdate({
+          messageId: event.data.messageId,
+          status: event.data.status,
+          conversationId: event.data.conversationId,
+        });
+      }
+    },
+    [handleNewMessage, handleStatusUpdate]
+  );
+
+  usePubSub({
+    userId: currentUserId,
+    autoConnect: Boolean(currentUserId),
+    onMessage: handlePubSubPayload,
+    onConnectionChange: setSocketConnected,
+  });
   
   // Keyboard shortcuts handler
   const handleKeyDown = useCallback(
