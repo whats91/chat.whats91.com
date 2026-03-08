@@ -7,6 +7,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
+import { getCurrentUserId } from '@/lib/config/current-user';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -88,7 +90,7 @@ export function ConversationView({
       
       {/* Messages - wrapper div with overflow-hidden is critical for ScrollArea */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <MessageList messages={messages} currentUserId="current-user" />
+        <MessageList messages={messages} currentUserId={getCurrentUserId()} />
       </div>
       
       {/* Composer - fixed at bottom */}
@@ -304,7 +306,7 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({ message, isOwn, showAvatar, showTimestamp }: MessageBubbleProps) {
-  const isSending = message.status === 'sending';
+  const isSending = message.status === 'pending';
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
   const isRead = message.status === 'read';
@@ -332,7 +334,7 @@ function MessageBubble({ message, isOwn, showAvatar, showTimestamp }: MessageBub
             : 'bg-muted'
         )}
       >
-        <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+        <MessageBubbleContent message={message} isOwn={isOwn} />
         {showTimestamp && (
           <div
             className={cn(

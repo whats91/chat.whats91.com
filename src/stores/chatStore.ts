@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Conversation, Message, SendMessageRequest } from '@/lib/types/chat';
 import { fetchConversations, fetchConversation, sendMessage as apiSendMessage } from '@/lib/api/client';
+import { getCurrentUserId } from '@/lib/config/current-user';
 import { mockLabels } from '@/lib/mock/data';
 
 interface ChatLabel {
@@ -118,9 +119,9 @@ export const useChatStore = create<ChatState>()(
               lastMessage: conv.lastMessageContent ? {
                 id: `last-${conv.id}`,
                 conversationId: String(conv.id),
-                senderId: conv.lastMessageDirection === 'inbound' ? String(conv.id) : 'current-user',
+                senderId: conv.lastMessageDirection === 'inbound' ? String(conv.id) : getCurrentUserId(),
                 content: conv.lastMessageContent,
-                type: (conv.lastMessageType || 'text') as 'text' | 'image' | 'video' | 'audio' | 'document' | 'template',
+                type: (conv.lastMessageType || 'text') as Message['type'],
                 status: 'read',
                 timestamp: conv.lastMessageAt ? new Date(conv.lastMessageAt) : new Date(),
               } : undefined,
@@ -167,17 +168,24 @@ export const useChatStore = create<ChatState>()(
               id: msg.id,
               conversationId: msg.conversationId,
               whatsappMessageId: msg.whatsappMessageId,
-              senderId: msg.direction === 'inbound' ? msg.fromPhone : 'current-user',
+              senderId: msg.direction === 'inbound' ? msg.fromPhone : getCurrentUserId(),
               fromPhone: msg.fromPhone,
               toPhone: msg.toPhone,
               direction: msg.direction,
-              type: msg.type as 'text' | 'image' | 'video' | 'audio' | 'document' | 'template',
+              type: msg.type as Message['type'],
               content: msg.content,
               status: msg.status as 'pending' | 'sent' | 'delivered' | 'read' | 'failed',
               timestamp: new Date(msg.timestamp),
+              replyTo: msg.replyTo,
               mediaUrl: msg.mediaUrl,
               mediaMimeType: msg.mediaMimeType,
               mediaFilename: msg.mediaFilename,
+              mediaCaption: msg.mediaCaption,
+              interactiveData: msg.interactiveData,
+              locationData: msg.locationData,
+              contactData: msg.contactData,
+              webhookData: msg.webhookData,
+              errorMessage: msg.errorMessage,
               isRead: msg.isRead,
               readAt: msg.readAt ? new Date(msg.readAt) : undefined,
               incomingPayload: msg.incomingPayload,
@@ -256,11 +264,11 @@ export const useChatStore = create<ChatState>()(
           id: tempId,
           conversationId,
           whatsappMessageId: tempId,
-          senderId: 'current-user',
+          senderId: getCurrentUserId(),
           fromPhone: '',
           toPhone: '',
           direction: 'outbound',
-          type: type as 'text' | 'image' | 'video' | 'audio' | 'document' | 'template',
+          type: type as Message['type'],
           content,
           status: 'pending',
           timestamp: new Date(),

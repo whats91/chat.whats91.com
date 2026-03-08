@@ -51,11 +51,19 @@ loadEnvFile();
 const CONFIG = {
   projectPath: process.env.DEPLOY_PROJECT_PATH || "/home/whats91-chat/htdocs/chat.whats91.com",
   tempPath: process.env.DEPLOY_TEMP_PATH || "/home/whats91-chat/htdocs/chat.whats91.com/temp",
-  repoUrl: process.env.DEPLOY_REPO_URL || "https://github.com/travel-dev82/chat.whats91.com.git",
+  repoUrl: process.env.DEPLOY_REPO_URL || "https://github.com/whats91/chat.whats91.com.git",
   branch: process.env.DEPLOY_BRANCH || "main",
   delayMs: 3000,
   pm2RestartCmd: "pm2 restart whats91-chat",
   lockFile: "/home/whats91-chat/htdocs/chat.whats91.com/.deploy.lock",
+  github: {
+    token:
+      process.env.DEPLOY_GITHUB_TOKEN ||
+      process.env.GITHUB_FINE_GRAINED_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      "",
+    username: process.env.DEPLOY_GITHUB_USERNAME || "x-access-token",
+  },
 
   // Bot Master Sender API config for notifications
   botMaster: {
@@ -109,6 +117,37 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getRepoOrigin(repoUrl) {
+  try {
+    const url = new URL(repoUrl);
+    return `${url.protocol}//${url.host}/`;
+  } catch {
+    return null;
+  }
+}
+
+function buildGitAuthEnv() {
+  if (!CONFIG.github.token) {
+    return {};
+  }
+
+  const repoOrigin = getRepoOrigin(CONFIG.repoUrl);
+  if (!repoOrigin) {
+    throw new Error(`Invalid DEPLOY_REPO_URL: ${CONFIG.repoUrl}`);
+  }
+
+  const authValue = Buffer.from(
+    `${CONFIG.github.username}:${CONFIG.github.token}`,
+    "utf-8"
+  ).toString("base64");
+
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `http.${repoOrigin}.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: Basic ${authValue}`,
+  };
+}
+
 /**
  * Deployment lock functions to prevent concurrent deployments
  */
@@ -145,9 +184,10 @@ function releaseLock() {
 /**
  * Run a command with CLEAN environment
  */
-function runCommand(command, args, cwd) {
+function runCommand(command, args, cwd, options = {}) {
   return new Promise((resolve, reject) => {
-    log(`Running: ${command} ${args.join(" ")}`, "cyan");
+    const displayArgs = options.displayArgs || args;
+    log(`Running: ${command} ${displayArgs.join(" ")}`, "cyan");
     log(`  CWD: ${cwd}`, "magenta");
     
     const cleanEnv = {
@@ -156,6 +196,7 @@ function runCommand(command, args, cwd) {
       PATH: process.env.PATH,
       NODE_PATH: process.env.NODE_PATH,
       NVM_DIR: process.env.NVM_DIR,
+      ...options.extraEnv,
     };
     
     log(`  PATH: ${cleanEnv.PATH?.substring(0, 100)}...`, "magenta");
@@ -393,6 +434,8 @@ async function deploy() {
   log(`  Branch: ${CONFIG.branch}`, "magenta");
   log(`  Node Version: ${process.version}`, "magenta");
   log(`  Version: ${getVersion()}`, "magenta");
+  log(`  Repo URL: ${CONFIG.repoUrl}`, "magenta");
+  log(`  GitHub token: ${CONFIG.github.token ? "configured" : "not configured"}`, "magenta");
   
   // Verify project path exists
   if (!fs.existsSync(CONFIG.projectPath)) {
@@ -404,6 +447,7 @@ async function deploy() {
     // STEP 1: Pull to temp
     logSection("STEP 1: Pull latest code into temp folder");
     ensureDir(CONFIG.tempPath);
+    const gitAuthEnv = buildGitAuthEnv();
 
     const tempGitDir = path.join(CONFIG.tempPath, ".git");
     if (!fs.existsSync(tempGitDir)) {
@@ -413,7 +457,10 @@ async function deploy() {
     }
 
     await runCommand("git", ["remote", "set-url", "origin", CONFIG.repoUrl], CONFIG.tempPath);
-    await runCommand("git", ["fetch", "origin", CONFIG.branch], CONFIG.tempPath);
+    await runCommand("git", ["fetch", "origin", CONFIG.branch], CONFIG.tempPath, {
+      extraEnv: gitAuthEnv,
+      displayArgs: ["fetch", "origin", CONFIG.branch, "--auth-header"],
+    });
     await runCommand("git", ["reset", "--hard", `origin/${CONFIG.branch}`], CONFIG.tempPath);
     await runCommand("git", ["log", "-1", "--oneline"], CONFIG.tempPath);
 
