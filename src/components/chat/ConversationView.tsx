@@ -126,15 +126,32 @@ function getConversationMessagePreview(message: Message): string {
 }
 
 function compareMessageTimeline(left: Message, right: Message): number {
-  const timestampDiff = new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
-  if (timestampDiff !== 0) {
-    return timestampDiff;
-  }
-
   const leftId = Number(left.id);
   const rightId = Number(right.id);
+  const leftTimestamp = left.timestamp instanceof Date ? left.timestamp.getTime() : new Date(left.timestamp).getTime();
+  const rightTimestamp =
+    right.timestamp instanceof Date ? right.timestamp.getTime() : new Date(right.timestamp).getTime();
+
+  if (Number.isFinite(leftTimestamp) && Number.isFinite(rightTimestamp)) {
+    const timestampDiff = leftTimestamp - rightTimestamp;
+    if (timestampDiff !== 0) {
+      return timestampDiff;
+    }
+  } else if (!Number.isFinite(leftTimestamp) || !Number.isFinite(rightTimestamp)) {
+    debugPubSub('ConversationView encountered invalid message timestamp during sort fallback', {
+      leftMessageId: left.id,
+      rightMessageId: right.id,
+      leftTimestamp,
+      rightTimestamp,
+    });
+  }
+
   if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
     return leftId - rightId;
+  }
+
+  if (left.whatsappMessageId && right.whatsappMessageId && left.whatsappMessageId !== right.whatsappMessageId) {
+    return left.whatsappMessageId.localeCompare(right.whatsappMessageId);
   }
 
   return String(left.id).localeCompare(String(right.id));

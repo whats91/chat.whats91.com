@@ -31,8 +31,44 @@ interface ChatLabel {
   color: string;
 }
 
+function parseTimestampCandidate(value: Message['timestamp'] | string | number | null | undefined): Date | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const epochMilliseconds = value > 1e12 ? value : value * 1000;
+    const parsed = new Date(epochMilliseconds);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      const numericValue = Number(trimmed);
+      if (Number.isFinite(numericValue)) {
+        const epochMilliseconds = trimmed.length >= 13 ? numericValue : numericValue * 1000;
+        const parsed = new Date(epochMilliseconds);
+        if (Number.isFinite(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+
+    const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+    const parsed = new Date(normalized);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  return null;
+}
+
 function toMessageDate(value: Message['timestamp'] | string | number): Date {
-  return value instanceof Date ? value : new Date(value);
+  return parseTimestampCandidate(value) || new Date();
 }
 
 function compareMessages(left: Message, right: Message): number {
@@ -409,7 +445,7 @@ export const useChatStore = create<ChatState>()(
               type: msg.type as Message['type'],
               content: msg.content,
               status: msg.status as 'pending' | 'sent' | 'delivered' | 'read' | 'failed',
-              timestamp: new Date(msg.timestamp),
+              timestamp: toMessageDate(msg.timestamp),
               replyTo: msg.replyTo,
               mediaUrl: msg.mediaUrl,
               mediaMimeType: msg.mediaMimeType,
@@ -423,7 +459,7 @@ export const useChatStore = create<ChatState>()(
               isRead: msg.isRead,
               isPinned: Boolean(msg.isPinned),
               isStarred: Boolean(msg.isStarred),
-              readAt: msg.readAt ? new Date(msg.readAt) : undefined,
+              readAt: msg.readAt ? toMessageDate(msg.readAt) : undefined,
               incomingPayload: msg.incomingPayload,
               outgoingPayload: msg.outgoingPayload,
             }));

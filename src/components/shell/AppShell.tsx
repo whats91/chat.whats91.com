@@ -62,6 +62,54 @@ function normalizePayloadObject(
   return value;
 }
 
+function parsePubSubTimestamp(
+  ...candidates: Array<string | number | Date | null | undefined>
+): Date {
+  for (const candidate of candidates) {
+    if (candidate instanceof Date) {
+      if (Number.isFinite(candidate.getTime())) {
+        return candidate;
+      }
+      continue;
+    }
+
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      const epochMilliseconds = candidate > 1e12 ? candidate : candidate * 1000;
+      const parsed = new Date(epochMilliseconds);
+      if (Number.isFinite(parsed.getTime())) {
+        return parsed;
+      }
+      continue;
+    }
+
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      if (/^\d+$/.test(trimmed)) {
+        const numericValue = Number(trimmed);
+        if (Number.isFinite(numericValue)) {
+          const epochMilliseconds = trimmed.length >= 13 ? numericValue : numericValue * 1000;
+          const parsed = new Date(epochMilliseconds);
+          if (Number.isFinite(parsed.getTime())) {
+            return parsed;
+          }
+        }
+      }
+
+      const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+      const parsed = new Date(normalized);
+      if (Number.isFinite(parsed.getTime())) {
+        return parsed;
+      }
+    }
+  }
+
+  return new Date();
+}
+
 function isLegacyStatusPayload(
   payload: PubSubClientPayload
 ): payload is LegacyPubSubStatusPayload {
@@ -97,7 +145,7 @@ function mapPubSubMessageToChatMessage(event: PubSubNewMessageEvent): Message {
     content: messageRecord.messageContent,
     type: messageRecord.messageType as Message['type'],
     status: messageRecord.status as Message['status'],
-    timestamp: new Date(messageRecord.timestamp),
+    timestamp: parsePubSubTimestamp(messageRecord.timestamp, event.timestamp),
     mediaUrl: messageRecord.mediaUrl || null,
     mediaMimeType: messageRecord.mediaMimeType || null,
     mediaFilename: messageRecord.mediaFilename || null,
@@ -162,10 +210,9 @@ function mapLegacyPubSubPayloadToChatMessage(
       null,
     status: (payload.status ||
       (direction === 'outbound' ? 'sent' : 'delivered')) as Message['status'],
-    timestamp: new Date(
-      payload.messageRecord?.timestamp ||
-        payload.processedAt ||
-        new Date().toISOString()
+    timestamp: parsePubSubTimestamp(
+      payload.messageRecord?.timestamp,
+      payload.processedAt
     ),
     mediaUrl: ensureHttps(media?.url || null),
     mediaMimeType: media?.mimeType || null,
