@@ -435,6 +435,7 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         const page = options.page ?? 1;
         const append = options.append ?? false;
+        const hasExplicitLabelId = Object.prototype.hasOwnProperty.call(options, 'labelId');
         const query: ConversationListQuery = {
           ...state.conversationListQuery,
           ...options,
@@ -443,7 +444,7 @@ export const useChatStore = create<ChatState>()(
           unreadOnly: options.unreadOnly ?? state.conversationListQuery.unreadOnly,
           status: options.status ?? state.conversationListQuery.status,
           limit: options.limit ?? state.conversationListQuery.limit,
-          labelId: options.labelId ?? state.conversationListQuery.labelId,
+          labelId: hasExplicitLabelId ? options.labelId ?? '' : state.conversationListQuery.labelId,
         };
         const requestId = ++conversationListRequestSequence;
         const isFreshTopLevelQuery =

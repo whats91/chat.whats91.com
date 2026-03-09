@@ -208,7 +208,7 @@ export function ChatList({ className }: ChatListProps) {
       search: searchQuery.trim(),
       archived: filter === 'archived',
       unreadOnly: filter === 'unread',
-      labelId: selectedLabelId || undefined,
+      labelId: selectedLabelId ?? '',
     });
   }, [filter, filterRefreshToken, loadConversations, searchQuery, selectedLabelId]);
 
