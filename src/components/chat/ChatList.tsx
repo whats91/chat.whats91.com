@@ -6,6 +6,7 @@ import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDi
 import { fetchCsrfToken, logout as logoutSession } from '@/lib/api/auth-client';
 import { exportAllConversationsToExcel } from '@/lib/api/client';
 import { clearCurrentUserId } from '@/lib/config/current-user';
+import { formatChatPhoneNumber } from '@/lib/phone/format';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -381,10 +382,17 @@ function ChatListItem({
   onDelete,
 }: ChatListItemProps) {
   const { participant, lastMessage, unreadCount, isPinned, isMuted, typing } = conversation;
-  const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
-  const participantPhone = participant?.phone || conversation.contactPhone;
+  const participantPhone = formatChatPhoneNumber(participant?.phone || conversation.contactPhone);
+  const rawParticipantName = conversation.contactName?.trim() || participant?.name?.trim() || '';
+  const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
+    ? rawParticipantName
+    : participantPhone;
   const participantAvatar = participant?.avatar;
   const participantStatus = participant?.status;
+  const hasDedicatedContactName = Boolean(conversation.contactName?.trim());
+  const lastMessagePreview = typing?.isTyping
+    ? null
+    : lastMessage?.content || lastMessage?.mediaCaption || lastMessage?.mediaFilename || '';
   
   const initials = participantName
     .split(' ')
@@ -419,25 +427,30 @@ function ChatListItem({
       </div>
       
       {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-medium truncate">{participantName}</span>
+            <span className="truncate text-[15px] font-medium text-foreground dark:text-white">{participantName}</span>
             {isPinned && <Pin className="h-3 w-3 text-muted-foreground" />}
             {isMuted && <BellOff className="h-3 w-3 text-muted-foreground" />}
           </div>
-          <span className="text-xs text-muted-foreground flex-shrink-0">
-            {timeAgo}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-2 mt-0.5">
-          <p className="text-sm text-muted-foreground truncate">
+          {hasDedicatedContactName ? (
+            <p className="mt-0.5 truncate text-[11px] font-medium tracking-[0.01em] text-foreground/75 dark:text-foreground/80">
+              {participantPhone}
+            </p>
+          ) : null}
+          <p className="mt-0.5 truncate text-[12px] leading-4 text-foreground/70 dark:text-foreground/75">
             {typing?.isTyping ? (
               <span className="text-primary">typing...</span>
             ) : (
-              lastMessage?.content || participantPhone
+              lastMessagePreview || participantPhone
             )}
           </p>
+        </div>
+        <div className="flex flex-shrink-0 flex-col items-end gap-1.5 pt-0.5">
+          <span className="text-[11px] text-foreground/60 dark:text-muted-foreground">
+            {timeAgo}
+          </span>
           {unreadCount > 0 && (
             <Badge variant="default" className="h-5 min-w-5 px-1.5 text-xs rounded-full">
               {unreadCount}

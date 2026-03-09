@@ -21,6 +21,7 @@ import {
   uploadMedia,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
+import { formatChatPhoneNumber } from '@/lib/phone/format';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
 import { debugPubSub } from '@/lib/pubsub/debug';
@@ -45,7 +46,9 @@ import {
   ChevronDown,
   ChevronUp,
   Paperclip,
+  Plus,
   Image as ImageIcon,
+  FileText,
   Send,
   Check,
   CheckCheck,
@@ -671,9 +674,12 @@ function ConversationHeader({
   onDeleteConversation,
 }: ConversationHeaderProps) {
   const { participant, typing } = conversation;
-  const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
   const participantAvatar = participant?.avatar;
-  const participantPhone = participant?.phone || conversation.contactPhone;
+  const participantPhone = formatChatPhoneNumber(participant?.phone || conversation.contactPhone);
+  const rawParticipantName = conversation.contactName?.trim() || participant?.name?.trim() || '';
+  const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
+    ? rawParticipantName
+    : participantPhone;
   const participantStatus = participant?.status;
   const participantLastSeen = participant?.lastSeen;
   
@@ -1205,9 +1211,11 @@ function MessageComposer({
   const { loadConversations, loadMessages } = useChatStore();
   const [message, setMessage] = useState('');
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [isMobileUtilityTrayOpen, setIsMobileUtilityTrayOpen] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
-  const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const mobileMessageInputRef = useRef<HTMLInputElement | null>(null);
+  const desktopMessageInputRef = useRef<HTMLInputElement | null>(null);
   
   const handleSend = () => {
     if (!isBlocked && message.trim()) {
@@ -1224,7 +1232,10 @@ function MessageComposer({
   };
 
   const insertEmoji = (emoji: string) => {
-    const input = messageInputRef.current;
+    const input =
+      typeof window !== 'undefined' && window.innerWidth < 768
+        ? mobileMessageInputRef.current || desktopMessageInputRef.current
+        : desktopMessageInputRef.current || mobileMessageInputRef.current;
     const selectionStart = input?.selectionStart ?? message.length;
     const selectionEnd = input?.selectionEnd ?? message.length;
 
@@ -1236,6 +1247,16 @@ function MessageComposer({
       input?.focus();
       input?.setSelectionRange(cursorPosition, cursorPosition);
     });
+  };
+
+  const handleOpenAttachmentPicker = () => {
+    setIsMobileUtilityTrayOpen(false);
+    attachmentInputRef.current?.click();
+  };
+
+  const handleOpenMediaPicker = () => {
+    setIsMobileUtilityTrayOpen(false);
+    mediaInputRef.current?.click();
   };
 
   const reloadConversationState = async () => {
@@ -1300,6 +1321,7 @@ function MessageComposer({
 
   useEffect(() => {
     setMessage('');
+    setIsMobileUtilityTrayOpen(false);
   }, [conversationId]);
   
   return (
@@ -1327,66 +1349,141 @@ function MessageComposer({
         </div>
       ) : null}
       {isBlocked || !isServiceWindowOpen ? null : (
-        <div className="flex items-end gap-2">
-          <TooltipProvider>
-            <EmojiPicker
-              disabled={isBlocked || isUploadingAttachment}
-              onSelectEmoji={insertEmoji}
-            />
-            
-            <Tooltip>
-              <TooltipTrigger asChild>
+        <>
+          <div className="mb-2 md:hidden">
+            {isMobileUtilityTrayOpen ? (
+              <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-2 py-2">
+                <EmojiPicker
+                  disabled={isBlocked || isUploadingAttachment}
+                  onSelectEmoji={insertEmoji}
+                />
                 <Button
+                  type="button"
                   variant="ghost"
                   size="icon"
                   className="h-9 w-9 flex-shrink-0"
                   disabled={isBlocked || isUploadingAttachment}
-                  onClick={() => attachmentInputRef.current?.click()}
+                  onClick={handleOpenMediaPicker}
                 >
-                  <Paperclip className="h-5 w-5 text-muted-foreground" />
+                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>Attach</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          
-          <div className="flex-1 relative">
-            <Input
-              ref={messageInputRef}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
-              disabled={isBlocked || isUploadingAttachment}
-              className="rounded-full border-border/70 bg-input pr-10 shadow-none"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-              disabled={isBlocked || isUploadingAttachment}
-              onClick={() => mediaInputRef.current?.click()}
-            >
-              <ImageIcon className="h-4 w-4 text-muted-foreground" />
-            </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 flex-shrink-0"
+                  disabled={isBlocked || isUploadingAttachment}
+                  onClick={handleOpenAttachmentPicker}
+                >
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                </Button>
+              </div>
+            ) : null}
+            <div className="flex items-end gap-2 md:hidden">
+              <div className="basis-[15%]">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 rounded-full"
+                  disabled={isBlocked || isUploadingAttachment}
+                  onClick={() => setIsMobileUtilityTrayOpen((current) => !current)}
+                >
+                  <Plus className="h-5 w-5 text-muted-foreground" />
+                </Button>
+              </div>
+              <div className="relative min-w-0 basis-[70%]">
+                <Input
+                  ref={mobileMessageInputRef}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
+                  disabled={isBlocked || isUploadingAttachment}
+                  className="rounded-full border-border/70 bg-input shadow-none"
+                />
+              </div>
+              <div className="flex basis-[15%] justify-end">
+                {!isBlocked && !isUploadingAttachment && message.trim() ? (
+                  <Button
+                    size="icon"
+                    className="h-10 w-10 flex-shrink-0"
+                    onClick={handleSend}
+                  >
+                    <Send className="h-5 w-5" />
+                  </Button>
+                ) : (
+                  <VoiceMessageButton
+                    conversationId={conversationId}
+                    disabled={isBlocked || isUploadingAttachment}
+                    onSent={reloadConversationState}
+                  />
+                )}
+              </div>
+            </div>
           </div>
-          
-          {!isBlocked && !isUploadingAttachment && message.trim() ? (
-            <Button
-              size="icon"
-              className="h-9 w-9 flex-shrink-0"
-              onClick={handleSend}
-            >
-              <Send className="h-5 w-5" />
-            </Button>
-          ) : (
-            <VoiceMessageButton
-              conversationId={conversationId}
-              disabled={isBlocked || isUploadingAttachment}
-              onSent={reloadConversationState}
-            />
-          )}
-        </div>
+
+          <div className="hidden items-end gap-2 md:flex">
+            <TooltipProvider>
+              <EmojiPicker
+                disabled={isBlocked || isUploadingAttachment}
+                onSelectEmoji={insertEmoji}
+              />
+              
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 flex-shrink-0"
+                    disabled={isBlocked || isUploadingAttachment}
+                    onClick={handleOpenAttachmentPicker}
+                  >
+                    <Paperclip className="h-5 w-5 text-muted-foreground" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Attach</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            
+            <div className="relative flex-1">
+              <Input
+                ref={desktopMessageInputRef}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
+                disabled={isBlocked || isUploadingAttachment}
+                className="rounded-full border-border/70 bg-input pr-10 shadow-none"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                disabled={isBlocked || isUploadingAttachment}
+                onClick={handleOpenMediaPicker}
+              >
+                <ImageIcon className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
+            
+            {!isBlocked && !isUploadingAttachment && message.trim() ? (
+              <Button
+                size="icon"
+                className="h-9 w-9 flex-shrink-0"
+                onClick={handleSend}
+              >
+                <Send className="h-5 w-5" />
+              </Button>
+            ) : (
+              <VoiceMessageButton
+                conversationId={conversationId}
+                disabled={isBlocked || isUploadingAttachment}
+                onSent={reloadConversationState}
+              />
+            )}
+          </div>
+        </>
       )}
 
       <input

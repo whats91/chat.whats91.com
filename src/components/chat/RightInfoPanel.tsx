@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { toast } from '@/hooks/use-toast';
+import { formatChatPhoneNumber } from '@/lib/phone/format';
 import {
   Star,
   Bell,
@@ -54,8 +55,11 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   
   const { participant } = conversation;
   const conversationLabels = (conversation as Conversation & { labels?: string[] }).labels || [];
-  const participantName = participant?.name || conversation.contactName || conversation.contactPhone;
-  const participantPhone = participant?.phone || conversation.contactPhone;
+  const participantPhone = formatChatPhoneNumber(participant?.phone || conversation.contactPhone);
+  const rawParticipantName = conversation.contactName?.trim() || participant?.name?.trim() || '';
+  const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
+    ? rawParticipantName
+    : participantPhone;
   const participantAvatar = participant?.avatar;
   const participantEmail = participant?.email;
   
