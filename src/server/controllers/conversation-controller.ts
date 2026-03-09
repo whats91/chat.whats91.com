@@ -217,6 +217,14 @@ type LatestMessageHistoryStatus = {
   historyId: number;
 };
 
+type MessageHistoryTimeline = {
+  sentAt: Date | null;
+  deliveredAt: Date | null;
+  readAt: Date | null;
+  failedAt: Date | null;
+  errorMessage: string | null;
+};
+
 function getMessageStatusProgressRank(status: MessageStatus): number {
   switch (status) {
     case 'read':
@@ -384,6 +392,66 @@ async function applyMessageHistoryStatuses(messages: Message[]): Promise<Message
       },
     };
   });
+}
+
+function pickEarlierDate(currentValue: Date | null, nextValue: Date | null): Date | null {
+  if (!currentValue) {
+    return nextValue;
+  }
+
+  if (!nextValue) {
+    return currentValue;
+  }
+
+  return nextValue.getTime() < currentValue.getTime() ? nextValue : currentValue;
+}
+
+function buildMessageHistoryTimeline(
+  historyRows: Array<{ id: number; payload: unknown; created_at?: Date | null }>,
+  fallbackSentAt: Date | null,
+  fallbackReadAt: Date | null,
+  fallbackErrorMessage: string | null
+): MessageHistoryTimeline {
+  let sentAt = fallbackSentAt;
+  let deliveredAt: Date | null = null;
+  let readAt = fallbackReadAt;
+  let failedAt: Date | null = null;
+  let errorMessage = fallbackErrorMessage;
+
+  for (const row of historyRows) {
+    const statusUpdate = extractLatestMessageHistoryStatus(row.payload, row.id);
+    if (!statusUpdate) {
+      continue;
+    }
+
+    const eventTimestamp = statusUpdate.timestamp || row.created_at || null;
+
+    switch (statusUpdate.status) {
+      case 'sent':
+        sentAt = pickEarlierDate(sentAt, eventTimestamp);
+        break;
+      case 'delivered':
+        deliveredAt = pickEarlierDate(deliveredAt, eventTimestamp);
+        break;
+      case 'read':
+        readAt = pickEarlierDate(readAt, eventTimestamp);
+        break;
+      case 'failed':
+        failedAt = pickEarlierDate(failedAt, eventTimestamp);
+        errorMessage = statusUpdate.errorMessage || errorMessage;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    sentAt,
+    deliveredAt,
+    readAt,
+    failedAt,
+    errorMessage,
+  };
 }
 
 type ConversationLabelLinkRow = {
@@ -2878,6 +2946,83 @@ async function toggleMessageFlag({
   }
 }
 
+export async function getMessageInfo(conversationId: number, messageId: number, userId: string) {
+  try {
+    const [message] = await queryConversationsDb<{
+      id: number;
+      whatsapp_message_id: string;
+      direction: MessageDirection;
+      status: MessageStatus;
+      timestamp: Date | null;
+      created_at: Date | null;
+      read_at: Date | null;
+      error_message: string | null;
+    }>(
+      `SELECT
+         cm.id,
+         cm.whatsapp_message_id,
+         cm.direction,
+         cm.status,
+         cm.timestamp,
+         cm.created_at,
+         cm.read_at,
+         cm.error_message
+       FROM conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       WHERE cm.id = ? AND cm.conversation_id = ? AND c.user_id = ?
+       LIMIT 1`,
+      [messageId, conversationId, userId]
+    );
+
+    if (!message) {
+      return { success: false, message: 'Message not found', data: null };
+    }
+
+    const historyRows = await queryConversationsDb<{
+      id: number;
+      payload: unknown;
+      created_at: Date | null;
+    }>(
+      `SELECT id, payload, created_at
+       FROM conversation_message_history
+       WHERE whatsapp_message_id = ?
+       ORDER BY id ASC`,
+      [message.whatsapp_message_id]
+    );
+
+    const timeline = buildMessageHistoryTimeline(
+      historyRows,
+      message.timestamp || message.created_at || null,
+      message.read_at || null,
+      message.error_message || null
+    );
+
+    return {
+      success: true,
+      message: 'Message info retrieved successfully',
+      data: {
+        messageId: String(message.id),
+        whatsappMessageId: message.whatsapp_message_id,
+        direction: message.direction,
+        status: message.status,
+        sentAt: timeline.sentAt ? timeline.sentAt.toISOString() : null,
+        deliveredAt: timeline.deliveredAt ? timeline.deliveredAt.toISOString() : null,
+        readAt: timeline.readAt ? timeline.readAt.toISOString() : null,
+        failedAt: timeline.failedAt ? timeline.failedAt.toISOString() : null,
+        errorMessage: timeline.errorMessage,
+      },
+    };
+  } catch (error) {
+    log.error('getMessageInfo error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      messageId,
+      userId,
+    });
+    return { success: false, message: 'Failed to retrieve message info', data: null };
+  }
+}
+
 export async function toggleMessagePinned(conversationId: number, messageId: number, userId: string) {
   const result = await toggleMessageFlag({
     conversationId,
@@ -3269,6 +3414,7 @@ export const conversationController = {
   getConversationById,
   getPinnedMessage,
   getStarredMessages,
+  getMessageInfo,
   getConversationMediaMessages,
   sendMessage,
   sendVoiceNote,

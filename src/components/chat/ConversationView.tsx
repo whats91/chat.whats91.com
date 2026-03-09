@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
 import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
+import { MessageInfoDialog } from '@/components/chat/MessageInfoDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
 import { VoiceMessageButton } from '@/components/chat/VoiceMessageButton';
@@ -205,6 +206,7 @@ export function ConversationView({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
+  const [infoMessage, setInfoMessage] = useState<Message | null>(null);
   const [remotePinnedMessage, setRemotePinnedMessage] = useState<Message | null>(null);
   const [isExportingConversation, setIsExportingConversation] = useState(false);
   const [serviceWindowNow, setServiceWindowNow] = useState(() => Date.now());
@@ -526,6 +528,7 @@ export function ConversationView({
           messages={messages}
           currentUserId={currentUserId}
           onOpenMedia={(message) => setViewerMessage(message)}
+          onOpenInfo={(message) => setInfoMessage(message)}
           activeMatchId={activeMatchId}
           matchedMessageIds={matchedMessageIds}
         />
@@ -577,6 +580,16 @@ export function ConversationView({
         onOpenChange={setIsMediaDialogOpen}
         conversationId={conversation.id}
         conversationName={conversation.participant?.name || conversation.contactName || conversation.contactPhone}
+      />
+
+      <MessageInfoDialog
+        open={infoMessage !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setInfoMessage(null);
+          }
+        }}
+        message={infoMessage}
       />
 
       <ConversationDangerDialog
@@ -868,6 +881,7 @@ interface MessageListProps {
   messages: Message[];
   currentUserId: string;
   onOpenMedia: (message: Message) => void;
+  onOpenInfo: (message: Message) => void;
   activeMatchId: string | null;
   matchedMessageIds: Set<string>;
 }
@@ -876,6 +890,7 @@ function MessageList({
   messages,
   currentUserId,
   onOpenMedia,
+  onOpenInfo,
   activeMatchId,
   matchedMessageIds,
 }: MessageListProps) {
@@ -978,6 +993,7 @@ function MessageList({
                   message={message}
                   isOwn={message.senderId === currentUserId}
                   onOpenMedia={onOpenMedia}
+                  onOpenInfo={onOpenInfo}
                   isMatched={matchedMessageIds.has(message.id)}
                   isActiveMatch={activeMatchId === message.id}
                   showTimestamp={
@@ -1002,6 +1018,7 @@ interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
   onOpenMedia: (message: Message) => void;
+  onOpenInfo: (message: Message) => void;
   isMatched: boolean;
   isActiveMatch: boolean;
   showTimestamp: boolean;
@@ -1011,11 +1028,13 @@ function MessageBubble({
   message,
   isOwn,
   onOpenMedia,
+  onOpenInfo,
   isMatched,
   isActiveMatch,
   showTimestamp,
 }: MessageBubbleProps) {
   const { toggleMessagePinned, toggleMessageStarred } = useChatStore();
+  const canViewMessageInfo = Number.isFinite(Number(message.id));
   const isSending = message.status === 'pending';
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
@@ -1066,6 +1085,16 @@ function MessageBubble({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={isOwn ? 'end' : 'start'}>
+        <DropdownMenuItem
+          disabled={!canViewMessageInfo}
+          onClick={() => {
+            onOpenInfo(message);
+          }}
+        >
+          <Info className="mr-2 h-4 w-4" />
+          Info
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
             void handleTogglePinned();

@@ -522,6 +522,22 @@ export interface UpdateConversationProfileImageResponse {
   } | null;
 }
 
+export interface MessageInfoResponse {
+  success: boolean;
+  message: string;
+  data: {
+    messageId: string;
+    whatsappMessageId: string;
+    direction: MessageDirection;
+    status: MessageStatus;
+    sentAt: Date | string | null;
+    deliveredAt: Date | string | null;
+    readAt: Date | string | null;
+    failedAt: Date | string | null;
+    errorMessage: string | null;
+  } | null;
+}
+
 // ========================================
 // WHATSAPP API TYPES
 // ========================================

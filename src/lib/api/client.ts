@@ -13,6 +13,7 @@ import type {
   ConversationMediaResponse,
   ConversationTargetListResponse,
   ConversationLabelsResponse,
+  MessageInfoResponse,
   SendMessageRequest,
   SendMessageResponse,
   StartConversationRequest,
@@ -189,6 +190,20 @@ export async function fetchConversationMedia(
 
   const response = await fetch(
     `${API_BASE}/conversations/${conversationId}/media?${searchParams.toString()}`,
+    {
+      headers: getHeaders(),
+    }
+  );
+
+  return response.json();
+}
+
+export async function fetchMessageInfo(
+  conversationId: string | number,
+  messageId: string | number
+): Promise<MessageInfoResponse> {
+  const response = await fetch(
+    `${API_BASE}/conversations/${conversationId}/messages/${messageId}/info`,
     {
       headers: getHeaders(),
     }
@@ -484,6 +499,7 @@ export const api = {
     getPinnedMessage: fetchPinnedMessage,
     getStarredMessages: fetchStarredMessages,
     getConversationMedia: fetchConversationMedia,
+    fetchMessageInfo,
     sendMessage,
     fetchConversationTargets,
     startConversation,
