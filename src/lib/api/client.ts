@@ -26,6 +26,64 @@ function getHeaders(): HeadersInit {
   };
 }
 
+function getFilenameFromDisposition(contentDisposition: string | null, fallbackFilename: string): string {
+  if (!contentDisposition) {
+    return fallbackFilename;
+  }
+
+  const encodedMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    return decodeURIComponent(encodedMatch[1]);
+  }
+
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1].trim();
+  }
+
+  return fallbackFilename;
+}
+
+async function triggerFileDownloadFromResponse(response: Response, fallbackFilename: string): Promise<void> {
+  if (!response.ok) {
+    let errorMessage = 'Failed to download export';
+
+    try {
+      const errorPayload = await response.json();
+      if (typeof errorPayload?.message === 'string' && errorPayload.message.trim()) {
+        errorMessage = errorPayload.message;
+      }
+    } catch {
+      // Ignore malformed error bodies and keep the fallback message.
+    }
+
+    throw new Error(errorMessage);
+  }
+
+  const blob = await response.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const filename = getFilenameFromDisposition(
+    response.headers.get('content-disposition'),
+    fallbackFilename
+  );
+
+  const anchor = document.createElement('a');
+  anchor.href = downloadUrl;
+  anchor.download = filename;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(downloadUrl);
+  }, 1000);
+}
+
 /**
  * Fetch conversations list with pagination
  */
@@ -273,6 +331,20 @@ export async function deleteConversation(conversationId: string | number): Promi
   return response.json();
 }
 
+export async function exportConversationToExcel(conversationId: string | number): Promise<void> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/export`, {
+    credentials: 'include',
+  });
+  await triggerFileDownloadFromResponse(response, `whats91-chat-${conversationId}.xls`);
+}
+
+export async function exportAllConversationsToExcel(): Promise<void> {
+  const response = await fetch(`${API_BASE}/conversations/export`, {
+    credentials: 'include',
+  });
+  await triggerFileDownloadFromResponse(response, 'whats91-all-chats.xls');
+}
+
 /**
  * Upload media for messaging
  */
@@ -340,6 +412,8 @@ export const api = {
     toggleMessageStarred,
     clear: clearConversation,
     delete: deleteConversation,
+    exportConversationToExcel,
+    exportAllConversationsToExcel,
     uploadMedia,
     sendVoiceNote,
   },

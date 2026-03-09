@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { fetchCsrfToken, logout as logoutSession } from '@/lib/api/auth-client';
+import { exportAllConversationsToExcel } from '@/lib/api/client';
 import { clearCurrentUserId } from '@/lib/config/current-user';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
@@ -29,6 +30,7 @@ import {
   MoreVertical,
   MessageSquarePlus,
   Loader2,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { Conversation } from '@/lib/types/chat';
 import { toast } from '@/hooks/use-toast';
@@ -66,6 +68,7 @@ export function ChatList({ className }: ChatListProps) {
     conversationName: string;
   } | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isExportingAll, setIsExportingAll] = useState(false);
 
   async function handleLogout() {
     if (isLoggingOut) {
@@ -102,6 +105,30 @@ export function ChatList({ className }: ChatListProps) {
       });
     } finally {
       setIsLoggingOut(false);
+    }
+  }
+
+  async function handleExportAll() {
+    if (isExportingAll) {
+      return;
+    }
+
+    setIsExportingAll(true);
+
+    try {
+      await exportAllConversationsToExcel();
+      toast({
+        title: 'Export started',
+        description: 'Your Excel export is downloading.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Unable to export chats',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExportingAll(false);
     }
   }
 
@@ -191,6 +218,17 @@ export function ChatList({ className }: ChatListProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={isExportingAll}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    void handleExportAll();
+                  }}
+                >
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  {isExportingAll ? 'Exporting...' : 'Export all'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem>Settings</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={(event) => {

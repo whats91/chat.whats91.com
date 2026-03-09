@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
 import {
+  exportConversationToExcel,
   fetchPinnedMessage,
   sendMessage as sendConversationMessage,
   uploadMedia,
@@ -60,6 +61,7 @@ import {
   Archive,
   Pin,
   Trash2,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { Message, Conversation, ConversationTarget, SendMessageRequest } from '@/lib/types/chat';
 
@@ -184,6 +186,7 @@ export function ConversationView({
   const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(-1);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [remotePinnedMessage, setRemotePinnedMessage] = useState<Message | null>(null);
+  const [isExportingConversation, setIsExportingConversation] = useState(false);
   
   const messages = useMemo(
     () => {
@@ -392,6 +395,30 @@ export function ConversationView({
       description: `Sent to ${successfulConversationIds.size} recipient${successfulConversationIds.size === 1 ? '' : 's'}.`,
     });
   };
+
+  const handleExportConversation = async () => {
+    if (isExportingConversation) {
+      return;
+    }
+
+    setIsExportingConversation(true);
+
+    try {
+      await exportConversationToExcel(conversationId);
+      toast({
+        title: 'Export started',
+        description: 'This chat is downloading as an Excel file.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Unable to export this chat',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExportingConversation(false);
+    }
+  };
   
   if (!conversation) {
     return (
@@ -425,6 +452,10 @@ export function ConversationView({
         onBlockToggle={() => {
           void blockConversation(conversation.id);
         }}
+        onExportConversation={() => {
+          void handleExportConversation();
+        }}
+        isExportingConversation={isExportingConversation}
         onClearChat={() => setDangerAction('clear')}
         onDeleteConversation={() => setDangerAction('delete')}
       />
@@ -571,6 +602,8 @@ interface ConversationHeaderProps {
   onArchiveToggle: () => void;
   onPinToggle: () => void;
   onBlockToggle: () => void;
+  onExportConversation: () => void;
+  isExportingConversation: boolean;
   onClearChat: () => void;
   onDeleteConversation: () => void;
 }
@@ -588,6 +621,8 @@ function ConversationHeader({
   onArchiveToggle,
   onPinToggle,
   onBlockToggle,
+  onExportConversation,
+  isExportingConversation,
   onClearChat,
   onDeleteConversation,
 }: ConversationHeaderProps) {
@@ -701,6 +736,10 @@ function ConversationHeader({
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={onBlockToggle}>
               {conversation.isBlocked ? 'Unblock' : 'Block'}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={isExportingConversation} onClick={onExportConversation}>
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              {isExportingConversation ? 'Exporting...' : 'Export chat'}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onClearChat}>
               <Trash2 className="h-4 w-4 mr-2" />

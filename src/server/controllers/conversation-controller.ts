@@ -44,8 +44,19 @@ import {
 } from '@/server/media/conversation-media-service';
 import { Logger } from '@/lib/logger';
 import { prepareVoiceNoteAudio, type VoiceNoteRecordingMode } from '@/server/media/voice-note-audio';
+import { buildExcelWorkbookBuffer } from '@/server/export/chat-excel';
 
 const log = new Logger('ConversationCtrl');
+const exportTimestampFormatter = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true,
+});
 
 // ========================================
 // HELPER FUNCTIONS
@@ -242,6 +253,56 @@ function mapConversationMessageRowToMessage(msg: any): Message {
     isStarred: msg.is_starred || false,
     readAt: msg.read_at,
   };
+}
+
+function formatExportDateTime(value: Date | string | null | undefined): string {
+  if (!value) {
+    return '';
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return exportTimestampFormatter.format(date);
+}
+
+function formatExportBoolean(value: unknown): string {
+  return value ? 'Yes' : 'No';
+}
+
+function sanitizeExportFileSegment(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase() || 'chat';
+}
+
+function stringifyStructuredExportValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildExportTimestampSlug(referenceDate = new Date()): string {
+  return referenceDate
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z')
+    .replace(/[:T]/g, '-')
+    .replace(/Z$/, '')
+    .slice(0, 19);
 }
 
 // ========================================
@@ -2085,6 +2146,293 @@ export async function updateMessageStatus(
   }
 }
 
+type ConversationExportSuccess = {
+  success: true;
+  message: string;
+  data: {
+    filename: string;
+    buffer: Uint8Array;
+  };
+};
+
+type ConversationExportFailure = {
+  success: false;
+  message: string;
+  data: null;
+};
+
+type ConversationExportResult = ConversationExportSuccess | ConversationExportFailure;
+
+function buildConversationExportRows(message: Message) {
+  return [
+    message.id,
+    message.whatsappMessageId || '',
+    message.direction,
+    message.type,
+    message.content || '',
+    message.mediaCaption || '',
+    message.mediaFilename || '',
+    message.mediaMimeType || '',
+    message.mediaUrl || '',
+    stringifyStructuredExportValue(message.interactiveData),
+    stringifyStructuredExportValue(message.locationData),
+    stringifyStructuredExportValue(message.contactData),
+    message.status,
+    formatExportDateTime(message.timestamp),
+    message.fromPhone,
+    message.toPhone,
+    formatExportBoolean(message.isRead),
+    formatExportDateTime(message.readAt || null),
+    formatExportBoolean(message.isPinned),
+    formatExportBoolean(message.isStarred),
+    message.errorMessage || '',
+  ];
+}
+
+export async function exportConversationExcel(
+  conversationId: number,
+  userId: string
+): Promise<ConversationExportResult> {
+  try {
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT *
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found', data: null };
+    }
+
+    const messageRows = await queryConversationsDb<any>(
+      `SELECT *
+       FROM conversation_messages
+       WHERE conversation_id = ?
+       ORDER BY COALESCE(timestamp, created_at) ASC, id ASC`,
+      [conversationId]
+    );
+
+    const messages = messageRows.map(mapConversationMessageRowToMessage);
+    const displayName = getDisplayName(conversation.contact_name, conversation.contact_phone);
+    const exportTimestamp = new Date();
+    const workbook = buildExcelWorkbookBuffer([
+      {
+        name: 'Conversation',
+        rows: [
+          ['Field', 'Value'],
+          ['Conversation ID', conversation.id],
+          ['Display Name', displayName],
+          ['Contact Name', conversation.contact_name || ''],
+          ['Contact Phone', conversation.contact_phone],
+          ['WhatsApp Phone Number ID', conversation.whatsapp_phone_number_id || ''],
+          ['Status', conversation.status],
+          ['Pinned', formatExportBoolean(conversation.is_pinned)],
+          ['Archived', formatExportBoolean(conversation.is_archived)],
+          ['Muted', formatExportBoolean(conversation.is_muted)],
+          ['Blocked', formatExportBoolean(conversation.is_blocked)],
+          ['Unread Count', toSafeNumber(conversation.unread_count)],
+          ['Total Messages', toSafeNumber(conversation.total_messages)],
+          ['Last Message', conversation.last_message_content || ''],
+          ['Last Message Type', conversation.last_message_type || ''],
+          ['Last Message Direction', conversation.last_message_direction || ''],
+          ['Last Message At (IST)', formatExportDateTime(conversation.last_message_at)],
+          ['Exported At (IST)', formatExportDateTime(exportTimestamp)],
+        ],
+      },
+      {
+        name: 'Messages',
+        rows: [
+          [
+            'Message ID',
+            'WhatsApp Message ID',
+            'Direction',
+            'Type',
+            'Content',
+            'Media Caption',
+            'Media Filename',
+            'Media MIME Type',
+            'Media URL',
+            'Interactive Data',
+            'Location Data',
+            'Contact Data',
+            'Status',
+            'Timestamp (IST)',
+            'From Phone',
+            'To Phone',
+            'Read',
+            'Read At (IST)',
+            'Pinned',
+            'Starred',
+            'Error Message',
+          ],
+          ...messages.map(buildConversationExportRows),
+        ],
+      },
+    ]);
+
+    return {
+      success: true,
+      message: 'Conversation exported successfully',
+      data: {
+        filename: `whats91-chat-${sanitizeExportFileSegment(displayName)}-${buildExportTimestampSlug(exportTimestamp)}.xls`,
+        buffer: workbook,
+      },
+    };
+  } catch (error) {
+    log.error('exportConversationExcel error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to export conversation', data: null };
+  }
+}
+
+export async function exportAllConversationsExcel(userId: string): Promise<ConversationExportResult> {
+  try {
+    const conversations = await queryConversationsDb<any>(
+      `SELECT *
+       FROM conversations
+       WHERE user_id = ?
+       ORDER BY is_pinned DESC, COALESCE(last_message_at, updated_at) DESC, id DESC`,
+      [userId]
+    );
+
+    const messageRows = await queryConversationsDb<any>(
+      `SELECT
+         cm.*,
+         c.contact_name,
+         c.contact_phone,
+         c.status AS conversation_status,
+         c.is_archived,
+         c.is_pinned AS conversation_is_pinned,
+         c.is_muted,
+         c.is_blocked
+       FROM conversation_messages cm
+       INNER JOIN conversations c ON c.id = cm.conversation_id
+       WHERE c.user_id = ?
+       ORDER BY cm.conversation_id ASC, COALESCE(cm.timestamp, cm.created_at) ASC, cm.id ASC`,
+      [userId]
+    );
+
+    const exportTimestamp = new Date();
+    const workbook = buildExcelWorkbookBuffer([
+      {
+        name: 'Conversations',
+        rows: [
+          [
+            'Conversation ID',
+            'Display Name',
+            'Contact Name',
+            'Contact Phone',
+            'WhatsApp Phone Number ID',
+            'Status',
+            'Pinned',
+            'Archived',
+            'Muted',
+            'Blocked',
+            'Unread Count',
+            'Total Messages',
+            'Last Message',
+            'Last Message Type',
+            'Last Message Direction',
+            'Last Message At (IST)',
+            'Updated At (IST)',
+          ],
+          ...conversations.map((conversation) => [
+            conversation.id,
+            getDisplayName(conversation.contact_name, conversation.contact_phone),
+            conversation.contact_name || '',
+            conversation.contact_phone,
+            conversation.whatsapp_phone_number_id || '',
+            conversation.status,
+            formatExportBoolean(conversation.is_pinned),
+            formatExportBoolean(conversation.is_archived),
+            formatExportBoolean(conversation.is_muted),
+            formatExportBoolean(conversation.is_blocked),
+            toSafeNumber(conversation.unread_count),
+            toSafeNumber(conversation.total_messages),
+            conversation.last_message_content || '',
+            conversation.last_message_type || '',
+            conversation.last_message_direction || '',
+            formatExportDateTime(conversation.last_message_at),
+            formatExportDateTime(conversation.updated_at),
+          ]),
+        ],
+      },
+      {
+        name: 'Messages',
+        rows: [
+          [
+            'Conversation ID',
+            'Display Name',
+            'Contact Phone',
+            'Message ID',
+            'WhatsApp Message ID',
+            'Direction',
+            'Type',
+            'Content',
+            'Media Caption',
+            'Media Filename',
+            'Media MIME Type',
+            'Media URL',
+            'Interactive Data',
+            'Location Data',
+            'Contact Data',
+            'Status',
+            'Timestamp (IST)',
+            'From Phone',
+            'To Phone',
+            'Read',
+            'Read At (IST)',
+            'Pinned',
+            'Starred',
+            'Error Message',
+          ],
+          ...messageRows.map((row) => {
+            const message = mapConversationMessageRowToMessage(row);
+            const conversationDisplayName = getDisplayName(row.contact_name, row.contact_phone);
+
+            return [
+              message.conversationId,
+              conversationDisplayName,
+              row.contact_phone,
+              ...buildConversationExportRows(message),
+            ];
+          }),
+        ],
+      },
+      {
+        name: 'Export Info',
+        rows: [
+          ['Field', 'Value'],
+          ['Export Type', 'All conversations'],
+          ['Exported At (IST)', formatExportDateTime(exportTimestamp)],
+          ['Total Conversations', conversations.length],
+          ['Total Messages', messageRows.length],
+        ],
+      },
+    ]);
+
+    return {
+      success: true,
+      message: 'All conversations exported successfully',
+      data: {
+        filename: `whats91-all-chats-${sanitizeExportFileSegment(userId)}-${buildExportTimestampSlug(exportTimestamp)}.xls`,
+        buffer: workbook,
+      },
+    };
+  } catch (error) {
+    log.error('exportAllConversationsExcel error', {
+      error: error instanceof Error ? error.message : error,
+      userId,
+    });
+    return { success: false, message: 'Failed to export all conversations', data: null };
+  }
+}
+
 // Export controller
 export const conversationController = {
   getConversations,
@@ -2105,6 +2453,8 @@ export const conversationController = {
   toggleMessageStarred,
   clear: clearConversation,
   delete: deleteConversation,
+  exportConversationExcel,
+  exportAllConversationsExcel,
   processIncomingMessage,
   updateMessageStatus,
 };
