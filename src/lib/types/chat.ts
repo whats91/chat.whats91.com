@@ -430,6 +430,7 @@ export interface ConversationTarget {
   displayName: string;
   contactName: string | null;
   lastMessageAt: Date | string | null;
+  isServiceWindowOpen?: boolean;
 }
 
 export interface ConversationTargetListResponse {

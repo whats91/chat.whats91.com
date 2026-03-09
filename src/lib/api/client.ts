@@ -198,11 +198,13 @@ export async function sendMessage(
 export async function fetchConversationTargets(params: {
   search?: string;
   limit?: number;
+  serviceWindowOnly?: boolean;
 } = {}): Promise<ConversationTargetListResponse> {
   const searchParams = new URLSearchParams();
 
   if (params.search) searchParams.set('search', params.search);
   if (params.limit) searchParams.set('limit', String(params.limit));
+  if (params.serviceWindowOnly) searchParams.set('serviceWindowOnly', 'true');
 
   const response = await fetch(`${API_BASE}/conversations/contacts?${searchParams.toString()}`, {
     headers: getHeaders(),

@@ -536,6 +536,7 @@ export interface ConversationTargetItem {
   displayName: string;
   contactName: string | null;
   lastMessageAt: Date | null;
+  isServiceWindowOpen?: boolean;
 }
 
 interface ConversationTargetRow {
@@ -563,14 +564,17 @@ export async function getConversationTargets({
   userId,
   search,
   limit = 50,
+  serviceWindowOnly = false,
 }: {
   userId: string;
   search?: string;
   limit?: number;
+  serviceWindowOnly?: boolean;
 }) {
   try {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const trimmedSearch = search?.trim();
+    const serviceWindowThreshold = new Date(Date.now() - SERVICE_WINDOW_DURATION_MS);
 
     let conversationsSql = `
       SELECT id, contact_phone, contact_name, last_message_at, updated_at
@@ -578,6 +582,19 @@ export async function getConversationTargets({
       WHERE user_id = ? AND is_archived = false
     `;
     const conversationParams: unknown[] = [userId];
+
+    if (serviceWindowOnly) {
+      conversationsSql += `
+        AND EXISTS (
+          SELECT 1
+          FROM conversation_messages cm
+          WHERE cm.conversation_id = conversations.id
+            AND cm.direction = 'inbound'
+            AND COALESCE(cm.created_at, cm.timestamp) >= ?
+        )
+      `;
+      conversationParams.push(serviceWindowThreshold);
+    }
 
     if (trimmedSearch) {
       const searchPattern = `%${trimmedSearch}%`;
@@ -630,6 +647,7 @@ export async function getConversationTargets({
         displayName: getDisplayName(row.contact_name, normalizedPhone),
         contactName: row.contact_name,
         lastMessageAt: row.last_message_at || row.updated_at,
+        isServiceWindowOpen: serviceWindowOnly ? true : undefined,
       });
     }
 

@@ -548,6 +548,7 @@ export function ConversationView({
         confirmButtonText="Forward"
         allowManualEntry={false}
         sourceFilter="conversation"
+        serviceWindowOnly
         onConfirmSelection={handleForwardConfirm}
       />
 

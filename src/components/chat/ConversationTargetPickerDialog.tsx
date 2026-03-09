@@ -17,7 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { fetchConversationTargets } from '@/lib/api/client';
 import type { ConversationTarget } from '@/lib/types/chat';
 import { cn } from '@/lib/utils';
-import { Check, Search } from 'lucide-react';
+import { Check, Search, X } from 'lucide-react';
 
 interface ConversationTargetPickerDialogProps {
   open: boolean;
@@ -31,6 +31,7 @@ interface ConversationTargetPickerDialogProps {
   confirmButtonText?: string;
   allowManualEntry?: boolean;
   sourceFilter?: 'all' | 'conversation' | 'contact';
+  serviceWindowOnly?: boolean;
 }
 
 function normalizePhoneInput(value: string): string {
@@ -62,6 +63,7 @@ export function ConversationTargetPickerDialog({
   confirmButtonText = 'Forward',
   allowManualEntry = true,
   sourceFilter = 'all',
+  serviceWindowOnly = false,
 }: ConversationTargetPickerDialogProps) {
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
@@ -93,6 +95,7 @@ export function ConversationTargetPickerDialog({
         const response = await fetchConversationTargets({
           search: deferredSearch.trim() || undefined,
           limit: 60,
+          serviceWindowOnly,
         });
 
         if (cancelled) {
@@ -123,7 +126,7 @@ export function ConversationTargetPickerDialog({
     return () => {
       cancelled = true;
     };
-  }, [deferredSearch, open]);
+  }, [deferredSearch, open, serviceWindowOnly]);
 
   const selectableTargets = useMemo(() => {
     const filteredTargets = targets.filter((target) => {
@@ -211,25 +214,56 @@ export function ConversationTargetPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+        <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>{title}</DialogTitle>
           {effectiveDescription ? <DialogDescription>{effectiveDescription}</DialogDescription> : null}
         </DialogHeader>
 
-        <div className="relative mt-2">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search name or number"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="pl-9"
-            autoFocus
-          />
+        <div className="border-y px-6 py-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search name or number"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="pl-9"
+              autoFocus
+            />
+          </div>
         </div>
 
-        <ScrollArea className="mt-4 h-80">
-          <div className="space-y-1">
+        {isMultiple && selectedTargetsState.length > 0 ? (
+          <div className="border-b px-6 py-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Check className="h-3.5 w-3.5" />
+              <span>
+                {selectedTargetsState.length} selected
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {selectedTargetsState.map((target) => (
+                <div
+                  key={`selected-${target.id}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary"
+                >
+                  <span className="max-w-36 truncate">{target.displayName || formatPhoneDisplay(target.phone)}</span>
+                  <button
+                    type="button"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-primary/15"
+                    onClick={() => handleToggleSelection(target)}
+                    aria-label={`Remove ${target.displayName || target.phone}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <ScrollArea className="h-80 flex-1">
+          <div className="space-y-1 p-3">
             {selectableTargets.map((target) => {
               const displayName = target.displayName || formatPhoneDisplay(target.phone);
 
@@ -262,26 +296,13 @@ export function ConversationTargetPickerDialog({
                     <div className="flex items-center gap-2">
                       <p className="truncate font-medium">{displayName}</p>
                       <Badge variant="secondary" className="shrink-0">
-                      {target.conversationId ? 'Recent' : 'Contact'}
+                        {target.conversationId ? 'Recent' : 'Contact'}
                       </Badge>
                     </div>
                     <p className="truncate text-sm text-muted-foreground">
                       {formatPhoneDisplay(target.phone)}
                     </p>
                   </div>
-
-                  {isMultiple ? (
-                    <div
-                      className={cn(
-                        'flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
-                        selectedTargetIds.includes(target.id)
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border'
-                      )}
-                    >
-                      {selectedTargetIds.includes(target.id) ? <Check className="h-3.5 w-3.5" /> : null}
-                    </div>
-                  ) : null}
                 </button>
               );
             })}
@@ -307,7 +328,7 @@ export function ConversationTargetPickerDialog({
         </ScrollArea>
 
         {isMultiple ? (
-          <DialogFooter className="mt-2">
+          <DialogFooter className="border-t px-6 py-4">
             <Button
               type="button"
               variant="ghost"

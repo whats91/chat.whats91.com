@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
       userId,
       search: searchParams.get('search') || undefined,
       limit: parseInt(searchParams.get('limit') || '50', 10),
+      serviceWindowOnly: searchParams.get('serviceWindowOnly') === 'true',
     });
 
     return NextResponse.json(result, { status: result.success ? 200 : 400 });
