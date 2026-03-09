@@ -14,7 +14,6 @@ import { ChatList } from '@/components/chat/ChatList';
 import { ConversationView } from '@/components/chat/ConversationView';
 import { RightInfoPanel } from '@/components/chat/RightInfoPanel';
 import { NewChatModal } from '@/components/chat/NewChatModal';
-import { VersionFooter } from '@/components/common/VersionFooter';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { usePubSub } from '@/hooks/use-pubsub';
 import { debugPubSub, logPubSubPayload } from '@/lib/pubsub/debug';
@@ -828,7 +827,6 @@ export function AppShell() {
       </div>
       
       <NewChatModal open={isNewChatModalOpen} onOpenChange={toggleNewChatModal} />
-      <VersionFooter />
     </>
   );
 }

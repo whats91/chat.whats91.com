@@ -1350,9 +1350,9 @@ function MessageComposer({
       ) : null}
       {isBlocked || !isServiceWindowOpen ? null : (
         <>
-          <div className="mb-2 md:hidden">
+          <div className="relative md:hidden">
             {isMobileUtilityTrayOpen ? (
-              <div className="mb-1 flex flex-col items-start gap-1 pl-1">
+              <div className="absolute bottom-full left-1 z-20 mb-1 flex flex-col items-start gap-1">
                 <EmojiPicker
                   disabled={isBlocked || isUploadingAttachment}
                   onSelectEmoji={insertEmoji}
@@ -1382,7 +1382,7 @@ function MessageComposer({
                 </Button>
               </div>
             ) : null}
-            <div className="flex items-center gap-1 md:hidden">
+            <div className="flex items-center gap-1">
               <div className="flex w-10 flex-shrink-0 justify-start">
                 <Button
                   type="button"
