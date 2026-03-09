@@ -133,6 +133,18 @@ model ConversationMessage {
   @@map("conversation_messages")
 }
 
+model ConversationMessageHistory {
+  id                Int      @id @default(autoincrement()) @db.UnsignedInt
+  whatsappMessageId String   @map("whatsapp_message_id") @db.VarChar(255)
+  payload           Json
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  @@index([whatsappMessageId], map: "idx_cmh_whatsapp_message_id")
+  @@index([createdAt], map: "idx_cmh_created_at")
+  @@map("conversation_message_history")
+}
+
 // ========================================
 // MEDIA STORAGE MODEL
 // ========================================

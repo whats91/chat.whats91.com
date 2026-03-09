@@ -184,12 +184,24 @@ export async function POST(request: NextRequest) {
             if (status === 'failed' && statusUpdate.errors?.length) {
               errorMessage = statusUpdate.errors[0].message;
             }
+
+            const historyPayload: Record<string, unknown> = {
+              id: statusUpdate.id,
+              status: statusUpdate.status,
+              pricing: statusUpdate.pricing || null,
+              metadata: value.metadata || null,
+              timestamp: statusUpdate.timestamp,
+              conversation: statusUpdate.conversation || null,
+              recipient_id: statusUpdate.recipient_id || null,
+              errors: statusUpdate.errors || null,
+            };
             
             await conversationController.updateMessageStatus(
               statusUpdate.id,
               status,
               statusUpdate.errors?.[0]?.code?.toString(),
-              errorMessage
+              errorMessage,
+              historyPayload
             );
             
             log.debug('Status update', { id: statusUpdate.id, status });

@@ -55,13 +55,33 @@ export interface PubSubConversationUpdateEvent extends PubSubEvent {
 }
 
 export interface LegacyPubSubStatusPayload {
-  type: 'status';
+  type?: 'status';
+  eventType?: 'status_update';
   messageId: string;
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | string;
+  timestamp?: string | number;
   conversationId?: number | string;
+  recipientPhone?: string;
+  userId?: string | number;
+  phoneNumberId?: string | number;
+  businessPhoneNumber?: string;
+  errors?: Array<Record<string, unknown>> | null;
+  pricing?: Record<string, unknown> | null;
+  conversation?:
+    | {
+        id?: string;
+        origin?: {
+          type?: string;
+        } | null;
+        expiration_timestamp?: string;
+      }
+    | null;
+  processedAt?: string;
+  source?: string;
 }
 
 export interface LegacyPubSubMessagePayload {
+  eventType?: 'message';
   type: string;
   messageId?: string;
   timestamp?: string | number;

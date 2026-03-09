@@ -560,6 +560,19 @@ export interface WebhookEntry {
         status: string;
         timestamp: string;
         recipient_id: string;
+        pricing?: {
+          billable?: boolean;
+          pricing_model?: string;
+          category?: string;
+          type?: string;
+        };
+        conversation?: {
+          id?: string;
+          origin?: {
+            type?: string;
+          };
+          expiration_timestamp?: string;
+        };
         errors?: Array<{
           code: number;
           title: string;

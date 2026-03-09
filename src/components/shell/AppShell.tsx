@@ -146,7 +146,16 @@ function parseLatestPubSubTimestamp(
 function isLegacyStatusPayload(
   payload: PubSubClientPayload
 ): payload is LegacyPubSubStatusPayload {
-  return payload.type === 'status' && typeof payload.messageId === 'string';
+  return Boolean(
+    payload &&
+      typeof payload === 'object' &&
+      'messageId' in payload &&
+      typeof payload.messageId === 'string' &&
+      'status' in payload &&
+      typeof payload.status === 'string' &&
+      (('type' in payload && payload.type === 'status') ||
+        ('eventType' in payload && payload.eventType === 'status_update'))
+  );
 }
 
 function isLegacyMessagePayload(
@@ -534,16 +543,11 @@ export function AppShell() {
         handleStatusUpdate({
           messageId: payload.messageId,
           status: payload.status,
-          conversationId:
-            payload.conversationId ||
-            useChatStore.getState().selectedConversationId ||
-            '0',
+          conversationId: payload.conversationId || '0',
         });
         void maybeShowStatusNotification(
           payload.messageId,
-          payload.conversationId ||
-            useChatStore.getState().selectedConversationId ||
-            '0',
+          payload.conversationId || '0',
           payload.status
         );
         return;

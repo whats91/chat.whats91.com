@@ -76,6 +76,14 @@ export interface MediaStorage {
   updatedAt: Date;
 }
 
+export interface ConversationMessageHistory {
+  id: number;
+  whatsappMessageId: string;
+  payload: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 function parseDatabaseName(url: string): string {
   try {
     const parsed = new URL(url);

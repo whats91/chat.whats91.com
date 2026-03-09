@@ -129,6 +129,186 @@ function toSafeNumber(value: unknown): number {
   return 0;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return isObject(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return isObject(value) ? value : null;
+}
+
+function getStringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function parseHistoryTimestamp(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const epochMilliseconds = value > 1e12 ? value : value * 1000;
+    const parsed = new Date(epochMilliseconds);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      const numericValue = Number(trimmed);
+      if (Number.isFinite(numericValue)) {
+        const epochMilliseconds = trimmed.length >= 13 ? numericValue : numericValue * 1000;
+        const parsed = new Date(epochMilliseconds);
+        if (Number.isFinite(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+
+    const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+    const parsed = new Date(normalized);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  return null;
+}
+
+type LatestMessageHistoryStatus = {
+  status: MessageStatus;
+  rawStatus: string;
+  errorMessage: string | null;
+  timestamp: Date | null;
+};
+
+function extractLatestMessageHistoryStatus(payload: unknown): LatestMessageHistoryStatus | null {
+  const parsedPayload = parseJsonObject(payload);
+  if (!parsedPayload) {
+    return null;
+  }
+
+  const rawStatus = getStringValue(parsedPayload.status);
+  if (!rawStatus) {
+    return null;
+  }
+
+  const errors = Array.isArray(parsedPayload.errors) ? parsedPayload.errors : [];
+  const firstError = errors.find((entry) => isObject(entry));
+  const errorMessage = getStringValue(firstError?.message) || null;
+
+  return {
+    status: mapConversationMessageStatus(rawStatus),
+    rawStatus,
+    errorMessage,
+    timestamp: parseHistoryTimestamp(parsedPayload.timestamp),
+  };
+}
+
+async function storeConversationMessageHistory(
+  whatsappMessageId: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  await executeConversationsDb(
+    `INSERT INTO conversation_message_history
+     (whatsapp_message_id, payload, created_at, updated_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [whatsappMessageId, JSON.stringify(payload)]
+  );
+}
+
+async function getLatestMessageHistoryStatusMap(
+  whatsappMessageIds: string[]
+): Promise<Map<string, LatestMessageHistoryStatus>> {
+  const normalizedMessageIds = Array.from(
+    new Set(
+      whatsappMessageIds
+        .map((messageId) => messageId?.trim())
+        .filter((messageId): messageId is string => Boolean(messageId))
+    )
+  );
+
+  if (normalizedMessageIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = normalizedMessageIds.map(() => '?').join(', ');
+  const historyRows = await queryConversationsDb<{
+    id: number;
+    whatsapp_message_id: string;
+    payload: unknown;
+  }>(
+    `SELECT cmh.id, cmh.whatsapp_message_id, cmh.payload
+     FROM conversation_message_history cmh
+     INNER JOIN (
+       SELECT whatsapp_message_id, MAX(id) AS latest_id
+       FROM conversation_message_history
+       WHERE whatsapp_message_id IN (${placeholders})
+       GROUP BY whatsapp_message_id
+     ) latest ON latest.latest_id = cmh.id`,
+    normalizedMessageIds
+  );
+
+  const statusMap = new Map<string, LatestMessageHistoryStatus>();
+
+  for (const row of historyRows) {
+    const latestStatus = extractLatestMessageHistoryStatus(row.payload);
+    if (!latestStatus) {
+      continue;
+    }
+
+    statusMap.set(row.whatsapp_message_id, latestStatus);
+  }
+
+  return statusMap;
+}
+
+async function applyMessageHistoryStatuses(messages: Message[]): Promise<Message[]> {
+  const statusMap = await getLatestMessageHistoryStatusMap(
+    messages.map((message) => message.whatsappMessageId)
+  );
+
+  if (statusMap.size === 0) {
+    return messages;
+  }
+
+  return messages.map((message) => {
+    const latestStatus = statusMap.get(message.whatsappMessageId);
+    if (!latestStatus) {
+      return message;
+    }
+
+    const isRead = latestStatus.status === 'read' ? true : message.isRead;
+    const readAt =
+      latestStatus.status === 'read'
+        ? latestStatus.timestamp || message.readAt || null
+        : message.readAt || null;
+
+    return {
+      ...message,
+      status: latestStatus.status,
+      errorMessage: latestStatus.errorMessage || message.errorMessage,
+      isRead,
+      readAt,
+    };
+  });
+}
+
 function isMediaMessageType(value: string | null | undefined): boolean {
   return Boolean(value && MEDIA_MESSAGE_TYPES.has(value));
 }
@@ -881,7 +1061,9 @@ export async function getConversationById({
     const totalMessages = toSafeNumber(countResult?.total);
     
     // Format messages
-    const formattedMessages: Message[] = messages.map(mapConversationMessageRowToMessage);
+    const formattedMessages = await applyMessageHistoryStatuses(
+      messages.map(mapConversationMessageRowToMessage)
+    );
     
     // Mark as read and clear unread count
     await executeConversationsDb(
@@ -2158,9 +2340,21 @@ export async function updateMessageStatus(
   whatsappMessageId: string,
   status: MessageStatus,
   errorCode?: string,
-  errorMessage?: string
+  errorMessage?: string,
+  historyPayload?: Record<string, unknown> | null
 ) {
   try {
+    if (historyPayload) {
+      try {
+        await storeConversationMessageHistory(whatsappMessageId, historyPayload);
+      } catch (historyError) {
+        log.error('storeConversationMessageHistory error', {
+          whatsappMessageId,
+          error: historyError instanceof Error ? historyError.message : historyError,
+        });
+      }
+    }
+
     await executeConversationsDb(
       `UPDATE conversation_messages SET status = ?, error_message = ?, updated_at = datetime('now') WHERE whatsapp_message_id = ?`,
       [status, errorMessage || null, whatsappMessageId]
