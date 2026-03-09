@@ -24,7 +24,7 @@ import { getCurrentUserId } from '@/lib/config/current-user';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
 import { debugPubSub } from '@/lib/pubsub/debug';
-import { formatDateHeaderInIst, formatTimeInIst, getIstDateKey } from '@/lib/time/ist';
+import { formatDateHeaderInIst, formatDateInIst, formatTimeInIst, getIstDateKey } from '@/lib/time/ist';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -187,6 +187,7 @@ export function ConversationView({
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [remotePinnedMessage, setRemotePinnedMessage] = useState<Message | null>(null);
   const [isExportingConversation, setIsExportingConversation] = useState(false);
+  const [serviceWindowNow, setServiceWindowNow] = useState(() => Date.now());
   
   const messages = useMemo(
     () => {
@@ -220,6 +221,11 @@ export function ConversationView({
   const isPinnedMessageLoaded = Boolean(
     pinnedMessage && messages.some((message) => message.id === pinnedMessage.id)
   );
+  const isServiceWindowActive = Boolean(
+    conversation?.isServiceWindowOpen &&
+      (!conversation.serviceWindowExpiresAt ||
+        new Date(conversation.serviceWindowExpiresAt).getTime() > serviceWindowNow)
+  );
 
   useEffect(() => {
     debugPubSub('ConversationView live messages changed', {
@@ -228,6 +234,16 @@ export function ConversationView({
       latestMessage: messages[messages.length - 1] || null,
     });
   }, [conversationId, messages]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setServiceWindowNow(Date.now());
+    }, 60000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSearchOpen) {
@@ -324,6 +340,10 @@ export function ConversationView({
   };
 
   const handleForwardConfirm = async (targets: ConversationTarget[]) => {
+    if (!isServiceWindowActive) {
+      throw new Error('Service window is inactive for this chat');
+    }
+
     if (!viewerMessage) {
       throw new Error('No media is selected for forwarding');
     }
@@ -495,6 +515,8 @@ export function ConversationView({
       <MessageComposer
         conversationId={conversationId}
         isBlocked={conversation.isBlocked}
+        isServiceWindowOpen={isServiceWindowActive}
+        serviceWindowExpiresAt={conversation.serviceWindowExpiresAt || null}
         onSend={(content) => sendMessage(conversationId, content)}
       />
 
@@ -507,10 +529,14 @@ export function ConversationView({
             setViewerMessage(null);
           }
         }}
-        onForward={(message) => {
-          setViewerMessage(message);
-          setIsForwardPickerOpen(true);
-        }}
+        onForward={
+          isServiceWindowActive
+            ? (message) => {
+                setViewerMessage(message);
+                setIsForwardPickerOpen(true);
+              }
+            : undefined
+        }
       />
 
       <ConversationTargetPickerDialog
@@ -1116,6 +1142,8 @@ function MessageBubble({
 interface MessageComposerProps {
   conversationId: string;
   isBlocked: boolean;
+  isServiceWindowOpen: boolean;
+  serviceWindowExpiresAt: Date | null;
   onSend: (content: string) => void;
 }
 
@@ -1150,7 +1178,13 @@ function inferMessageTypeFromFile(file: File): SendMessageRequest['messageType']
   return 'document';
 }
 
-function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerProps) {
+function MessageComposer({
+  conversationId,
+  isBlocked,
+  isServiceWindowOpen,
+  serviceWindowExpiresAt,
+  onSend,
+}: MessageComposerProps) {
   const { loadConversations, loadMessages } = useChatStore();
   const [message, setMessage] = useState('');
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
@@ -1258,71 +1292,85 @@ function MessageComposer({ conversationId, isBlocked, onSend }: MessageComposerP
           This contact is blocked. Unblock the contact to send messages.
         </div>
       ) : null}
+      {!isBlocked && !isServiceWindowOpen ? (
+        <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Service window is inactive for this chat.
+          {serviceWindowExpiresAt ? (
+            <>
+              {' '}It expired on {formatDateInIst(serviceWindowExpiresAt)} at {formatTimeInIst(serviceWindowExpiresAt)} IST.
+            </>
+          ) : (
+            <> Wait for a new inbound message to reopen the 24-hour window.</>
+          )}
+        </div>
+      ) : null}
       {isUploadingAttachment ? (
         <div className="mb-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           Uploading attachment...
         </div>
       ) : null}
-      <div className="flex items-end gap-2">
-        <TooltipProvider>
-          <EmojiPicker
-            disabled={isBlocked || isUploadingAttachment}
-            onSelectEmoji={insertEmoji}
-          />
+      {isBlocked || !isServiceWindowOpen ? null : (
+        <div className="flex items-end gap-2">
+          <TooltipProvider>
+            <EmojiPicker
+              disabled={isBlocked || isUploadingAttachment}
+              onSelectEmoji={insertEmoji}
+            />
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 flex-shrink-0"
+                  disabled={isBlocked || isUploadingAttachment}
+                  onClick={() => attachmentInputRef.current?.click()}
+                >
+                  <Paperclip className="h-5 w-5 text-muted-foreground" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Attach</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 flex-shrink-0"
-                disabled={isBlocked || isUploadingAttachment}
-                onClick={() => attachmentInputRef.current?.click()}
-              >
-                <Paperclip className="h-5 w-5 text-muted-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Attach</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        
-        <div className="flex-1 relative">
-          <Input
-            ref={messageInputRef}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
-            disabled={isBlocked || isUploadingAttachment}
-            className="pr-10"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-            disabled={isBlocked || isUploadingAttachment}
-            onClick={() => mediaInputRef.current?.click()}
-          >
-            <ImageIcon className="h-4 w-4 text-muted-foreground" />
-          </Button>
+          <div className="flex-1 relative">
+            <Input
+              ref={messageInputRef}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
+              disabled={isBlocked || isUploadingAttachment}
+              className="pr-10"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+              disabled={isBlocked || isUploadingAttachment}
+              onClick={() => mediaInputRef.current?.click()}
+            >
+              <ImageIcon className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </div>
+          
+          {!isBlocked && !isUploadingAttachment && message.trim() ? (
+            <Button
+              size="icon"
+              className="h-9 w-9 flex-shrink-0"
+              onClick={handleSend}
+            >
+              <Send className="h-5 w-5" />
+            </Button>
+          ) : (
+            <VoiceMessageButton
+              conversationId={conversationId}
+              disabled={isBlocked || isUploadingAttachment}
+              onSent={reloadConversationState}
+            />
+          )}
         </div>
-        
-        {!isBlocked && !isUploadingAttachment && message.trim() ? (
-          <Button
-            size="icon"
-            className="h-9 w-9 flex-shrink-0"
-            onClick={handleSend}
-          >
-            <Send className="h-5 w-5" />
-          </Button>
-        ) : (
-          <VoiceMessageButton
-            conversationId={conversationId}
-            disabled={isBlocked || isUploadingAttachment}
-            onSent={reloadConversationState}
-          />
-        )}
-      </div>
+      )}
 
       <input
         ref={attachmentInputRef}

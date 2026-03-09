@@ -47,6 +47,7 @@ import { prepareVoiceNoteAudio, type VoiceNoteRecordingMode } from '@/server/med
 import { buildExcelWorkbookBuffer } from '@/server/export/chat-excel';
 
 const log = new Logger('ConversationCtrl');
+const SERVICE_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
 const exportTimestampFormatter = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
   year: 'numeric',
@@ -141,15 +142,26 @@ interface ResolvedConversationSendContext {
   resolvedPhoneNumberId: string;
   resolvedPhoneNumber: string | null;
   accessToken: string;
+  serviceWindow: ConversationServiceWindowState;
+}
+
+interface ConversationServiceWindowState {
+  isOpen: boolean;
+  lastInboundMessageAt: Date | null;
+  expiresAt: Date | null;
 }
 
 async function resolveConversationSendContext(
   conversationId: number,
-  userId: string
+  userId: string,
+  options: {
+    requireOpenServiceWindow?: boolean;
+  } = {}
 ): Promise<
   | { success: true; data: ResolvedConversationSendContext }
   | { success: false; message: string }
 > {
+  const { requireOpenServiceWindow = true } = options;
   const [conversation] = await queryConversationsDb<any>(
     `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
     [conversationId, userId]
@@ -166,6 +178,14 @@ async function resolveConversationSendContext(
     return {
       success: false,
       message: 'This contact is blocked. Unblock the contact to send messages.',
+    };
+  }
+
+  const serviceWindow = await getConversationServiceWindowState(conversationId, userId);
+  if (requireOpenServiceWindow && !serviceWindow.isOpen) {
+    return {
+      success: false,
+      message: 'Service window is inactive for this chat. Wait for a new inbound message before sending.',
     };
   }
 
@@ -236,7 +256,39 @@ async function resolveConversationSendContext(
       resolvedPhoneNumberId,
       resolvedPhoneNumber,
       accessToken,
+      serviceWindow,
     },
+  };
+}
+
+async function getConversationServiceWindowState(
+  conversationId: number,
+  userId: string
+): Promise<ConversationServiceWindowState> {
+  const [lastInboundMessage] = await queryConversationsDb<{
+    lastInboundMessageAt: Date | string | null;
+  }>(
+    `SELECT COALESCE(created_at, timestamp) AS lastInboundMessageAt
+     FROM conversation_messages cm
+     INNER JOIN conversations c ON c.id = cm.conversation_id
+     WHERE cm.conversation_id = ? AND c.user_id = ? AND cm.direction = 'inbound'
+     ORDER BY COALESCE(cm.created_at, cm.timestamp) DESC, cm.id DESC
+     LIMIT 1`,
+    [conversationId, userId]
+  );
+
+  const lastInboundMessageAt = lastInboundMessage?.lastInboundMessageAt
+    ? new Date(lastInboundMessage.lastInboundMessageAt)
+    : null;
+  const expiresAt = lastInboundMessageAt
+    ? new Date(lastInboundMessageAt.getTime() + SERVICE_WINDOW_DURATION_MS)
+    : null;
+  const isOpen = Boolean(expiresAt && expiresAt.getTime() > Date.now());
+
+  return {
+    isOpen,
+    lastInboundMessageAt,
+    expiresAt,
   };
 }
 
@@ -786,6 +838,8 @@ export async function getConversationById({
         data: null,
       };
     }
+
+    const serviceWindow = await getConversationServiceWindowState(conversationId, userId);
     
     // Get messages (oldest first for display)
     const offset = (page - 1) * limit;
@@ -827,6 +881,9 @@ export async function getConversationById({
           contactPhone: conversation.contact_phone,
           contactName: conversation.contact_name,
           isBlocked: Boolean(conversation.is_blocked),
+          isServiceWindowOpen: serviceWindow.isOpen,
+          serviceWindowStartedAt: serviceWindow.lastInboundMessageAt,
+          serviceWindowExpiresAt: serviceWindow.expiresAt,
           status: conversation.status,
         },
         messages: formattedMessages,

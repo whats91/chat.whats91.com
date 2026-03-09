@@ -102,6 +102,9 @@ export interface Conversation {
   contactId?: string | null;
   contactName?: string | null;
   whatsappPhoneNumberId: string;
+  isServiceWindowOpen: boolean;
+  serviceWindowStartedAt?: Date | null;
+  serviceWindowExpiresAt?: Date | null;
   
   // Last message info
   lastMessageId?: string | null;
@@ -380,6 +383,9 @@ export interface ConversationDetailResponse {
       contactPhone: string;
       contactName: string | null;
       isBlocked: boolean;
+      isServiceWindowOpen: boolean;
+      serviceWindowStartedAt: Date | string | null;
+      serviceWindowExpiresAt: Date | string | null;
       status: ConversationStatus;
     };
     messages: Message[];

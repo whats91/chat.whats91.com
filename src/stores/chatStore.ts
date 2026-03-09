@@ -25,6 +25,8 @@ import { getCurrentUserId } from '@/lib/config/current-user';
 import { mockLabels } from '@/lib/mock/data';
 import { debugPubSub } from '@/lib/pubsub/debug';
 
+const SERVICE_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
+
 interface ChatLabel {
   id: string;
   name: string;
@@ -120,6 +122,11 @@ function deduplicateMessages(messages: Message[]): Message[] {
   }
 
   return sortMessagesChronologically(Array.from(messageMap.values()));
+}
+
+function getServiceWindowExpiresAt(anchor: Message['timestamp'] | string | number | null | undefined): Date | null {
+  const parsedAnchor = parseTimestampCandidate(anchor);
+  return parsedAnchor ? new Date(parsedAnchor.getTime() + SERVICE_WINDOW_DURATION_MS) : null;
 }
 
 function findOptimisticMessageMatch(messages: Message[], incomingMessage: Message): Message | null {
@@ -220,6 +227,9 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
     contactPhone: conv.contactPhone,
     contactName: conv.contactName,
     whatsappPhoneNumberId: '',
+    isServiceWindowOpen: true,
+    serviceWindowStartedAt: null,
+    serviceWindowExpiresAt: null,
     lastMessageId: conv.lastMessageContent ? `last-${conv.id}` : null,
     lastMessageContent: conv.lastMessageContent,
     lastMessageType: (conv.lastMessageType || 'text') as Message['type'],
@@ -485,6 +495,13 @@ export const useChatStore = create<ChatState>()(
                     ? {
                         ...conversation,
                         isBlocked: response.data.conversation.isBlocked,
+                        isServiceWindowOpen: response.data.conversation.isServiceWindowOpen,
+                        serviceWindowStartedAt: response.data.conversation.serviceWindowStartedAt
+                          ? toMessageDate(response.data.conversation.serviceWindowStartedAt)
+                          : null,
+                        serviceWindowExpiresAt: response.data.conversation.serviceWindowExpiresAt
+                          ? toMessageDate(response.data.conversation.serviceWindowExpiresAt)
+                          : null,
                         status: response.data.conversation.status,
                       }
                     : conversation
@@ -574,6 +591,9 @@ export const useChatStore = create<ChatState>()(
               contactPhone: participantPhone,
               contactName: contactName || null,
               whatsappPhoneNumberId: '',
+              isServiceWindowOpen: true,
+              serviceWindowStartedAt: new Date(),
+              serviceWindowExpiresAt: getServiceWindowExpiresAt(new Date()),
               unreadCount: 0,
               totalMessages: 0,
               isPinned: false,
@@ -945,6 +965,18 @@ export const useChatStore = create<ChatState>()(
                   normalizedMessage.direction === 'inbound' && state.selectedConversationId !== conversationKey
                     ? existingConversation.unreadCount + 1
                     : existingConversation.unreadCount,
+                isServiceWindowOpen:
+                  normalizedMessage.direction === 'inbound'
+                    ? true
+                    : existingConversation.isServiceWindowOpen,
+                serviceWindowStartedAt:
+                  normalizedMessage.direction === 'inbound'
+                    ? normalizedMessage.timestamp
+                    : existingConversation.serviceWindowStartedAt ?? null,
+                serviceWindowExpiresAt:
+                  normalizedMessage.direction === 'inbound'
+                    ? getServiceWindowExpiresAt(normalizedMessage.timestamp)
+                    : existingConversation.serviceWindowExpiresAt ?? null,
                 updatedAt: normalizedMessage.timestamp,
               }
             : {
@@ -956,6 +988,13 @@ export const useChatStore = create<ChatState>()(
                     : normalizedMessage.toPhone,
                 contactName: null,
                 whatsappPhoneNumberId: '',
+                isServiceWindowOpen: normalizedMessage.direction === 'inbound',
+                serviceWindowStartedAt:
+                  normalizedMessage.direction === 'inbound' ? normalizedMessage.timestamp : null,
+                serviceWindowExpiresAt:
+                  normalizedMessage.direction === 'inbound'
+                    ? getServiceWindowExpiresAt(normalizedMessage.timestamp)
+                    : null,
                 lastMessageId: normalizedMessage.whatsappMessageId,
                 lastMessageContent: normalizedMessage.content,
                 lastMessageType: normalizedMessage.type,
