@@ -238,21 +238,12 @@ export function ChatList({ className }: ChatListProps) {
   
   const filteredConversations = useMemo(
     () =>
-      conversations
-        .filter(conv => {
-      if (selectedLabelId && !(conv.labels || []).some((label) => label.id === selectedLabelId)) {
-        return false;
-      }
-      if (filter === 'unread') return conv.unreadCount > 0;
-      if (filter === 'archived') return conv.isArchived;
-      return !conv.isArchived;
-        })
-        .sort((a, b) => {
-          if (a.isPinned && !b.isPinned) return -1;
-          if (!a.isPinned && b.isPinned) return 1;
-          return b.updatedAt.getTime() - a.updatedAt.getTime();
-        }),
-    [conversations, filter, selectedLabelId]
+      [...conversations].sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return b.updatedAt.getTime() - a.updatedAt.getTime();
+      }),
+    [conversations]
   );
   
   const searchFiltered = useMemo(
