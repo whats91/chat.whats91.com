@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,16 +11,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   CheckCircle,
   XCircle,
-  AlertCircle,
   Phone,
   Key,
   Globe,
   Shield,
   Bell,
-  Loader2,
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useNotifications } from '@/hooks/use-notifications';
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  getNotificationPreferences,
+  updateNotificationPreference,
+  type NotificationPreferences,
+} from '@/lib/notifications/preferences';
 
 export default function SettingsPage() {
   const { isSocketConnected } = useChatStore();
@@ -28,6 +33,21 @@ export default function SettingsPage() {
     isGranted, 
     requestPermission 
   } = useNotifications();
+  const [preferences, setPreferences] = useState<NotificationPreferences>(
+    DEFAULT_NOTIFICATION_PREFERENCES
+  );
+
+  useEffect(() => {
+    setPreferences(getNotificationPreferences());
+  }, []);
+
+  const handlePreferenceChange = (
+    key: keyof NotificationPreferences,
+    value: boolean
+  ) => {
+    const nextPreferences = updateNotificationPreference(key, value);
+    setPreferences(nextPreferences);
+  };
   
   return (
     <div className="flex-1 overflow-auto">
@@ -164,7 +184,14 @@ export default function SettingsPage() {
                       Get notified when you receive new messages
                     </p>
                   </div>
-                  <input type="checkbox" defaultChecked className="toggle toggle-primary" />
+                  <input
+                    type="checkbox"
+                    checked={preferences.newMessages}
+                    onChange={(event) =>
+                      handlePreferenceChange('newMessages', event.target.checked)
+                    }
+                    className="toggle toggle-primary"
+                  />
                 </div>
                 
                 <Separator />
@@ -176,7 +203,14 @@ export default function SettingsPage() {
                       Track message delivery and read status
                     </p>
                   </div>
-                  <input type="checkbox" defaultChecked className="toggle toggle-primary" />
+                  <input
+                    type="checkbox"
+                    checked={preferences.deliveryStatus}
+                    onChange={(event) =>
+                      handlePreferenceChange('deliveryStatus', event.target.checked)
+                    }
+                    className="toggle toggle-primary"
+                  />
                 </div>
                 
                 <Separator />
@@ -188,7 +222,14 @@ export default function SettingsPage() {
                       Play sound for new messages
                     </p>
                   </div>
-                  <input type="checkbox" defaultChecked className="toggle toggle-primary" />
+                  <input
+                    type="checkbox"
+                    checked={preferences.sound}
+                    onChange={(event) =>
+                      handlePreferenceChange('sound', event.target.checked)
+                    }
+                    className="toggle toggle-primary"
+                  />
                 </div>
               </CardContent>
             </Card>

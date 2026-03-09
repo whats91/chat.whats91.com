@@ -307,6 +307,13 @@ interface ChatState {
   toggleNewChatModal: () => void;
   setSearchFocused: (focused: boolean) => void;
   setSocketConnected: (connected: boolean) => void;
+  setConversationTyping: (data: {
+    conversationId: string;
+    isTyping: boolean;
+    userId?: string;
+    contactPhone?: string;
+    contactName?: string | null;
+  }) => void;
   
   // Message Actions
   sendMessage: (conversationId: string, content: string, type?: string, mediaUrl?: string) => Promise<void>;
@@ -545,6 +552,72 @@ export const useChatStore = create<ChatState>()(
       toggleNewChatModal: () => set((state) => ({ isNewChatModalOpen: !state.isNewChatModalOpen })),
       setSearchFocused: (focused) => set({ isSearchFocused: focused }),
       setSocketConnected: (connected) => set({ isSocketConnected: connected }),
+      setConversationTyping: ({ conversationId, isTyping, userId, contactPhone, contactName }) => {
+        set((state) => {
+          const existingConversation = state.conversations.find((conversation) => conversation.id === conversationId);
+          const typingState = isTyping
+            ? {
+                isTyping: true,
+                userId: userId || contactPhone,
+              }
+            : undefined;
+
+          if (!existingConversation) {
+            if (!isTyping) {
+              return state;
+            }
+
+            const participantPhone = contactPhone || conversationId;
+            const placeholderConversation: Conversation = {
+              id: conversationId,
+              userId: getCurrentUserId(),
+              contactPhone: participantPhone,
+              contactName: contactName || null,
+              whatsappPhoneNumberId: '',
+              unreadCount: 0,
+              totalMessages: 0,
+              isPinned: false,
+              isArchived: false,
+              isMuted: false,
+              isBlocked: false,
+              status: 'active',
+              metaData: null,
+              participant: {
+                id: participantPhone,
+                name: contactName || participantPhone,
+                phone: participantPhone,
+                status: 'typing',
+              },
+              typing: typingState,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
+
+            return {
+              conversations: sortConversations([placeholderConversation, ...state.conversations]),
+            };
+          }
+
+          return {
+            conversations: state.conversations.map((conversation) => {
+              if (conversation.id !== conversationId) {
+                return conversation;
+              }
+
+              return {
+                ...conversation,
+                typing: typingState,
+                participant: conversation.participant
+                  ? {
+                      ...conversation.participant,
+                      status: isTyping ? 'typing' : conversation.participant.status === 'typing' ? 'offline' : conversation.participant.status,
+                    }
+                  : conversation.participant,
+              };
+            }),
+          };
+        });
+      },
       
       // Send message
       sendMessage: async (conversationId, content, type = 'text', mediaUrl) => {

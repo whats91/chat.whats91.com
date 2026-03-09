@@ -88,7 +88,7 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body,
     icon: '/icons/icon-192x192.png',
-    badge: '/icons/icon-72x72.png',
+    badge: '/icons/icon-192x192.png',
     vibrate: [200, 100, 200],
     tag: data.tag || 'default',
     data: data.data || {},
@@ -109,16 +109,23 @@ self.addEventListener('notificationclick', (event) => {
 
   if (event.action === 'dismiss') return;
 
+  const conversationId = event.notification.data?.conversationId;
+  const targetUrl = conversationId ? `/?conversation=${conversationId}` : '/';
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((clients) => {
         // Focus existing window or open new one
         for (const client of clients) {
           if (client.url.includes(self.location.origin) && 'focus' in client) {
+            client.postMessage({
+              type: 'open-conversation',
+              conversationId,
+            });
             return client.focus();
           }
         }
-        return self.clients.openWindow('/');
+        return self.clients.openWindow(targetUrl);
       })
   );
 });

@@ -15,6 +15,8 @@ export interface NotificationOptions {
   requireInteraction?: boolean;
   silent?: boolean;
   vibrate?: number | number[];
+  renotify?: boolean;
+  timestamp?: number;
   actions?: Array<{
     action: string;
     title: string;
@@ -29,6 +31,18 @@ export interface NotificationPermissionState {
 }
 
 type NotificationCallback = (notification: Notification, action?: string) => void;
+
+type ServiceWorkerNotificationOptions = globalThis.NotificationOptions & {
+  badge?: string;
+  vibrate?: number | number[];
+  renotify?: boolean;
+  timestamp?: number;
+  actions?: Array<{
+    action: string;
+    title: string;
+    icon?: string;
+  }>;
+};
 
 // Store callbacks
 const notificationCallbacks = new Map<string, NotificationCallback>();
@@ -98,29 +112,31 @@ export async function show(options: NotificationOptions): Promise<Notification |
   }
   
   try {
-    // Check if we should use service worker (for PWA)
-    if (isServiceWorkerSupported() && navigator.serviceWorker.controller) {
+    if (isServiceWorkerSupported()) {
       const registration = await navigator.serviceWorker.ready;
-      
-      await registration.showNotification(options.title, {
+
+      const notificationOptions: ServiceWorkerNotificationOptions = {
         body: options.body,
-        icon: options.icon || '/icon-192x192.png',
-        badge: options.badge || '/badge-72x72.png',
+        icon: options.icon || '/icons/icon-192x192.png',
+        badge: options.badge || '/icons/icon-192x192.png',
         tag: options.tag,
         data: options.data,
         requireInteraction: options.requireInteraction,
         silent: options.silent,
         vibrate: options.vibrate || [200, 100, 200],
+        renotify: options.renotify,
+        timestamp: options.timestamp,
         actions: options.actions,
-      });
-      
+      };
+
+      await registration.showNotification(options.title, notificationOptions);
       return null; // Service worker handles the notification
     }
     
     // Fall back to regular notification
     const notification = new Notification(options.title, {
       body: options.body,
-      icon: options.icon || '/icon-192x192.png',
+      icon: options.icon || '/icons/icon-192x192.png',
       tag: options.tag,
       data: options.data,
       requireInteraction: options.requireInteraction,
@@ -162,9 +178,11 @@ export async function showMessageNotification(data: {
   contactPhone: string;
   messageContent: string | null;
   messageType: string;
+  icon?: string | null;
+  silent?: boolean;
   onClick?: () => void;
 }): Promise<Notification | null> {
-  const { conversationId, contactName, contactPhone, messageContent, messageType, onClick } = data;
+  const { conversationId, contactName, contactPhone, messageContent, messageType, icon, silent, onClick } = data;
   
   // Get preview text
   const previewText = getPreviewText(messageType, messageContent);
@@ -178,18 +196,22 @@ export async function showMessageNotification(data: {
     title: contactName || `+${contactPhone}`,
     body: previewText,
     tag: `conv-${conversationId}`,
-    icon: '/icon-192x192.png',
-    badge: '/badge-72x72.png',
+    icon: icon || '/icons/icon-192x192.png',
+    badge: '/icons/icon-192x192.png',
     requireInteraction: false,
-    silent: false,
+    silent: silent ?? false,
     vibrate: [200, 100, 200],
+    renotify: true,
+    timestamp: Date.now(),
     data: {
       conversationId,
+      contactName,
+      contactPhone,
       type: 'message',
     },
     actions: [
-      { action: 'reply', title: 'Reply' },
-      { action: 'mark-read', title: 'Mark as Read' },
+      { action: 'open', title: 'Open chat' },
+      { action: 'dismiss', title: 'Dismiss' },
     ],
   });
 }

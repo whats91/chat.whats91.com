@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import type { Message } from '@/lib/types/chat';
 import type {
   LegacyPubSubMessagePayload,
@@ -18,8 +18,15 @@ import { VersionFooter } from '@/components/common/VersionFooter';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { usePubSub } from '@/hooks/use-pubsub';
 import { debugPubSub } from '@/lib/pubsub/debug';
+import { getNotificationPreferences } from '@/lib/notifications/preferences';
+import {
+  getPermissionState as getNotificationPermissionState,
+  showMessageNotification,
+  showStatusNotification,
+} from '@/lib/notifications/service';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useServiceWorker } from '@/hooks/use-service-worker';
 
 // Keyboard shortcuts mapping (WhatsApp Web style)
 const SHORTCUTS = {
@@ -242,9 +249,176 @@ export function AppShell() {
     handleNewMessage,
     handleStatusUpdate,
     setSocketConnected,
+    setConversationTyping,
   } = useChatStore();
   const isMobile = useIsMobile();
   const currentUserId = getCurrentUserId();
+  const pendingIncomingTimersRef = useRef(new Map<string, number>());
+  const pendingTypingCountsRef = useRef(new Map<string, number>());
+
+  useServiceWorker({ registerOnMount: true });
+
+  const clearConversationTypingIfIdle = useCallback(
+    (conversationId: string, userId?: string, contactPhone?: string, contactName?: string | null) => {
+      const pendingCount = pendingTypingCountsRef.current.get(conversationId) || 0;
+      if (pendingCount > 0) {
+        return;
+      }
+
+      setConversationTyping({
+        conversationId,
+        isTyping: false,
+        userId,
+        contactPhone,
+        contactName,
+      });
+    },
+    [setConversationTyping]
+  );
+
+  const maybeShowIncomingNotification = useCallback(
+    async (message: Message) => {
+      const preferences = getNotificationPreferences();
+      if (!preferences.newMessages) {
+        debugPubSub('Skipped incoming notification because new message alerts are disabled', {
+          conversationId: message.conversationId,
+          messageId: message.id,
+        });
+        return;
+      }
+
+      if (!getNotificationPermissionState().granted) {
+        debugPubSub('Skipped incoming notification because browser permission is not granted', {
+          conversationId: message.conversationId,
+          messageId: message.id,
+        });
+        return;
+      }
+
+      const conversation = useChatStore
+        .getState()
+        .conversations.find((item) => item.id === message.conversationId);
+
+      if (conversation?.isMuted) {
+        debugPubSub('Skipped incoming notification because conversation is muted', {
+          conversationId: message.conversationId,
+          messageId: message.id,
+        });
+        return;
+      }
+
+      const contactPhone =
+        conversation?.participant?.phone ||
+        conversation?.contactPhone ||
+        message.fromPhone ||
+        message.toPhone;
+      const contactName =
+        conversation?.participant?.name || conversation?.contactName || null;
+
+      if (!contactPhone) {
+        return;
+      }
+
+      await showMessageNotification({
+        conversationId: Number(message.conversationId),
+        contactName,
+        contactPhone,
+        messageContent: message.content,
+        messageType: message.type,
+        icon: conversation?.participant?.avatar,
+        silent: !preferences.sound,
+        onClick: () => {
+          selectConversation(message.conversationId);
+        },
+      });
+    },
+    [selectConversation]
+  );
+
+  const maybeShowStatusNotification = useCallback(
+    async (messageId: string, conversationId: string | number, status: string) => {
+      const preferences = getNotificationPreferences();
+      if (!preferences.deliveryStatus || !getNotificationPermissionState().granted) {
+        return;
+      }
+
+      const conversationKey = String(conversationId);
+      const conversation = useChatStore
+        .getState()
+        .conversations.find((item) => item.id === conversationKey);
+
+      if (!conversation || conversation.isMuted) {
+        return;
+      }
+
+      await showStatusNotification({
+        messageId,
+        conversationId: Number(conversationKey),
+        contactName: conversation.participant?.name || conversation.contactName || null,
+        status,
+      });
+    },
+    []
+  );
+
+  const scheduleInboundMessage = useCallback(
+    (message: Message) => {
+      const conversationId = String(message.conversationId);
+      const timerKey = `${conversationId}:${message.whatsappMessageId || message.id}`;
+
+      if (pendingIncomingTimersRef.current.has(timerKey)) {
+        return;
+      }
+
+      const conversation = useChatStore
+        .getState()
+        .conversations.find((item) => item.id === conversationId);
+      const contactPhone =
+        conversation?.participant?.phone ||
+        conversation?.contactPhone ||
+        message.fromPhone;
+      const contactName =
+        conversation?.participant?.name || conversation?.contactName || null;
+
+      pendingTypingCountsRef.current.set(
+        conversationId,
+        (pendingTypingCountsRef.current.get(conversationId) || 0) + 1
+      );
+
+      setConversationTyping({
+        conversationId,
+        isTyping: true,
+        userId: message.senderId,
+        contactPhone,
+        contactName,
+      });
+
+      const timeoutId = window.setTimeout(() => {
+        pendingIncomingTimersRef.current.delete(timerKey);
+        pendingTypingCountsRef.current.set(
+          conversationId,
+          Math.max((pendingTypingCountsRef.current.get(conversationId) || 1) - 1, 0)
+        );
+
+        clearConversationTypingIfIdle(
+          conversationId,
+          message.senderId,
+          contactPhone,
+          contactName
+        );
+
+        handleNewMessage({
+          conversationId,
+          message,
+        });
+
+        void maybeShowIncomingNotification(message);
+      }, 700);
+
+      pendingIncomingTimersRef.current.set(timerKey, timeoutId);
+    },
+    [clearConversationTypingIfIdle, handleNewMessage, maybeShowIncomingNotification, setConversationTyping]
+  );
 
   const handlePubSubPayload = useCallback(
     (payload: PubSubClientPayload) => {
@@ -261,9 +435,15 @@ export function AppShell() {
           whatsappMessageId: event.data.messageRecord.whatsappMessageId,
           event,
         });
+        const message = mapPubSubMessageToChatMessage(event);
+        if (message.direction === 'inbound') {
+          scheduleInboundMessage(message);
+          return;
+        }
+
         handleNewMessage({
           conversationId: event.data.conversation.id,
-          message: mapPubSubMessageToChatMessage(event),
+          message,
         });
         return;
       }
@@ -281,6 +461,11 @@ export function AppShell() {
           status: event.data.status,
           conversationId: event.data.conversationId,
         });
+        void maybeShowStatusNotification(
+          event.data.messageId,
+          event.data.conversationId,
+          event.data.status
+        );
         return;
       }
 
@@ -296,6 +481,13 @@ export function AppShell() {
             useChatStore.getState().selectedConversationId ||
             '0',
         });
+        void maybeShowStatusNotification(
+          payload.messageId,
+          payload.conversationId ||
+            useChatStore.getState().selectedConversationId ||
+            '0',
+          payload.status
+        );
         return;
       }
 
@@ -314,6 +506,11 @@ export function AppShell() {
           whatsappMessageId: legacyMessage.whatsappMessageId,
           payload,
         });
+        if (legacyMessage.direction === 'inbound') {
+          scheduleInboundMessage(legacyMessage);
+          return;
+        }
+
         handleNewMessage({
           conversationId: legacyMessage.conversationId,
           message: legacyMessage,
@@ -325,7 +522,7 @@ export function AppShell() {
         payload,
       });
     },
-    [handleNewMessage, handleStatusUpdate]
+    [handleNewMessage, handleStatusUpdate, maybeShowStatusNotification, scheduleInboundMessage]
   );
 
   usePubSub({
@@ -414,6 +611,55 @@ export function AppShell() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const conversationId = params.get('conversation');
+    if (!conversationId) {
+      return;
+    }
+
+    selectConversation(conversationId);
+    params.delete('conversation');
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', nextUrl);
+  }, [selectConversation]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      return;
+    }
+
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'open-conversation' || !event.data.conversationId) {
+        return;
+      }
+
+      selectConversation(String(event.data.conversationId));
+      window.focus();
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+    };
+  }, [selectConversation]);
+
+  useEffect(() => {
+    return () => {
+      pendingIncomingTimersRef.current.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      pendingIncomingTimersRef.current.clear();
+      pendingTypingCountsRef.current.clear();
+    };
+  }, []);
   
   return (
     <>
