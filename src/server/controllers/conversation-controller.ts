@@ -33,7 +33,7 @@ import {
 import { uploadMediaToMeta } from '../whatsapp/media-upload';
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
 import { findCloudApiSetupByUserAndPhoneNumberId, findDefaultCloudApiSetupByUser } from '../db/cloud-api-setup';
-import { getChatLabelsByIds, getChatLabelsByUserAndPhoneNumber } from '../db/chat-labels';
+import { getChatLabelsByIds, getChatLabelsByUser, getChatLabelsByUserAndPhoneNumber } from '../db/chat-labels';
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
 import { buildConversationMediaProxyUrl, MEDIA_MESSAGE_TYPES } from '@/lib/media/conversation-media';
 import { db } from '@/lib/db';
@@ -726,6 +726,7 @@ export interface GetConversationsParams {
   status?: string;
   archived?: boolean;
   unreadOnly?: boolean;
+  labelId?: string;
 }
 
 export async function getConversations({
@@ -736,6 +737,7 @@ export async function getConversations({
   status = 'active',
   archived = false,
   unreadOnly = false,
+  labelId,
 }: GetConversationsParams) {
   try {
     const offset = (page - 1) * limit;
@@ -743,41 +745,53 @@ export async function getConversations({
     // Build the SQL query
     let sql = `
       SELECT 
-        id, contact_phone, contact_name, whatsapp_phone_number_id,
-        last_message_id, last_message_content, last_message_type,
-        last_message_at, last_message_direction, unread_count,
-        total_messages, is_archived, is_pinned, is_muted, is_blocked, status,
-        created_at, updated_at
-      FROM conversations
-      WHERE user_id = ?
+        c.id, c.contact_phone, c.contact_name, c.whatsapp_phone_number_id,
+        c.last_message_id, c.last_message_content, c.last_message_type,
+        c.last_message_at, c.last_message_direction, c.unread_count,
+        c.total_messages, c.is_archived, c.is_pinned, c.is_muted, c.is_blocked, c.status,
+        c.created_at, c.updated_at
+      FROM conversations c
+      WHERE c.user_id = ?
     `;
     
     const params: unknown[] = [userId];
     
     // Add filters
     if (search) {
-      sql += ` AND (contact_name LIKE ? OR contact_phone LIKE ? OR last_message_content LIKE ?)`;
+      sql += ` AND (c.contact_name LIKE ? OR c.contact_phone LIKE ? OR c.last_message_content LIKE ?)`;
       const searchPattern = `%${search}%`;
       params.push(searchPattern, searchPattern, searchPattern);
     }
     
     if (status !== 'all') {
-      sql += ` AND status = ?`;
+      sql += ` AND c.status = ?`;
       params.push(status);
     }
     
     if (archived) {
-      sql += ` AND is_archived = true`;
+      sql += ` AND c.is_archived = true`;
     } else {
-      sql += ` AND is_archived = false`;
+      sql += ` AND c.is_archived = false`;
     }
     
     if (unreadOnly) {
-      sql += ` AND unread_count > 0`;
+      sql += ` AND c.unread_count > 0`;
+    }
+
+    if (labelId) {
+      sql += `
+        AND EXISTS (
+          SELECT 1
+          FROM conversation_labels cl
+          WHERE cl.conversation_id = c.id
+            AND cl.label_id = ?
+        )
+      `;
+      params.push(labelId);
     }
     
     // Add ordering and pagination
-    sql += ` ORDER BY is_pinned DESC, COALESCE(last_message_at, updated_at) DESC, id DESC LIMIT ? OFFSET ?`;
+    sql += ` ORDER BY c.is_pinned DESC, COALESCE(c.last_message_at, c.updated_at) DESC, c.id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
     
     // Execute query
@@ -788,28 +802,40 @@ export async function getConversations({
     );
     
     // Get total count
-    let countSql = `SELECT COUNT(*) as total FROM conversations WHERE user_id = ?`;
+    let countSql = `SELECT COUNT(*) as total FROM conversations c WHERE c.user_id = ?`;
     const countParams: unknown[] = [userId];
     
     if (search) {
-      countSql += ` AND (contact_name LIKE ? OR contact_phone LIKE ? OR last_message_content LIKE ?)`;
+      countSql += ` AND (c.contact_name LIKE ? OR c.contact_phone LIKE ? OR c.last_message_content LIKE ?)`;
       const searchPattern = `%${search}%`;
       countParams.push(searchPattern, searchPattern, searchPattern);
     }
     
     if (status !== 'all') {
-      countSql += ` AND status = ?`;
+      countSql += ` AND c.status = ?`;
       countParams.push(status);
     }
     
     if (archived) {
-      countSql += ` AND is_archived = true`;
+      countSql += ` AND c.is_archived = true`;
     } else {
-      countSql += ` AND is_archived = false`;
+      countSql += ` AND c.is_archived = false`;
     }
     
     if (unreadOnly) {
-      countSql += ` AND unread_count > 0`;
+      countSql += ` AND c.unread_count > 0`;
+    }
+
+    if (labelId) {
+      countSql += `
+        AND EXISTS (
+          SELECT 1
+          FROM conversation_labels cl
+          WHERE cl.conversation_id = c.id
+            AND cl.label_id = ?
+        )
+      `;
+      countParams.push(labelId);
     }
 
     const [countResult] = await queryConversationsDb<any>(countSql, countParams);
@@ -1246,6 +1272,7 @@ export async function getConversationById({
           displayName: getDisplayName(conversation.contact_name, conversation.contact_phone),
           contactPhone: conversation.contact_phone,
           contactName: conversation.contact_name,
+          conversationNotes: conversation.conversation_notes || null,
           isBlocked: Boolean(conversation.is_blocked),
           isServiceWindowOpen: serviceWindow.isOpen,
           serviceWindowStartedAt: serviceWindow.lastInboundMessageAt,
@@ -2179,9 +2206,75 @@ export async function updateConversationName(
   }
 }
 
+export async function updateConversationNotes(
+  conversationId: number,
+  userId: string,
+  conversationNotes: string
+) {
+  try {
+    const normalizedNotes = conversationNotes.trim();
+    const storedNotes = normalizedNotes || null;
+
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT id
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found', data: null };
+    }
+
+    await executeConversationsDb(
+      `UPDATE conversations
+       SET conversation_notes = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [storedNotes, conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: storedNotes ? 'Conversation notes updated' : 'Conversation notes cleared',
+      data: {
+        conversationId: String(conversationId),
+        conversationNotes: storedNotes,
+      },
+    };
+  } catch (error) {
+    log.error('updateConversationNotes error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to update conversation notes', data: null };
+  }
+}
+
 // ========================================
 // CONVERSATION LABELS
 // ========================================
+
+export async function getUserChatLabels(userId: string) {
+  try {
+    const labels = await getChatLabelsByUser(userId);
+
+    return {
+      success: true,
+      message: 'Chat labels retrieved successfully',
+      data: {
+        labels,
+      },
+    };
+  } catch (error) {
+    log.error('getUserChatLabels error', {
+      error: error instanceof Error ? error.message : error,
+      userId,
+    });
+    return { success: false, message: 'Failed to retrieve chat labels', data: null };
+  }
+}
 
 export async function getConversationLabels(conversationId: number, userId: string) {
   try {
@@ -3011,6 +3104,7 @@ export async function exportAllConversationsExcel(userId: string): Promise<Conve
 // Export controller
 export const conversationController = {
   getConversations,
+  getUserChatLabels,
   getConversationTargets,
   startConversation,
   getConversationById,
@@ -3025,6 +3119,7 @@ export const conversationController = {
   toggleMute: toggleMuteConversation,
   toggleBlock: toggleBlockConversation,
   updateConversationName,
+  updateConversationNotes,
   getConversationLabels,
   updateConversationLabels,
   toggleMessagePinned,

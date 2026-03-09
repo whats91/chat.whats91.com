@@ -4,7 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { fetchCsrfToken, logout as logoutSession } from '@/lib/api/auth-client';
-import { exportAllConversationsToExcel } from '@/lib/api/client';
+import { exportAllConversationsToExcel, fetchChatLabels } from '@/lib/api/client';
 import { clearCurrentUserId } from '@/lib/config/current-user';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
 import { cn } from '@/lib/utils';
@@ -33,7 +33,7 @@ import {
   Loader2,
   FileSpreadsheet,
 } from 'lucide-react';
-import type { Conversation } from '@/lib/types/chat';
+import type { ChatLabel, Conversation } from '@/lib/types/chat';
 import { toast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -60,6 +60,8 @@ export function ChatList({ className }: ChatListProps) {
   } = useChatStore();
   
   const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all');
+  const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
+  const [availableLabels, setAvailableLabels] = useState<ChatLabel[]>([]);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const scrollAreaContainerRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
@@ -134,13 +136,40 @@ export function ChatList({ className }: ChatListProps) {
   }
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadLabels = async () => {
+      try {
+        const response = await fetchChatLabels();
+
+        if (cancelled || !response.success || !response.data) {
+          return;
+        }
+
+        setAvailableLabels(response.data.labels || []);
+      } catch {
+        if (!cancelled) {
+          setAvailableLabels([]);
+        }
+      }
+    };
+
+    void loadLabels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     void loadConversations({
       page: 1,
       search: deferredSearchQuery.trim(),
       archived: filter === 'archived',
       unreadOnly: filter === 'unread',
+      labelId: selectedLabelId || undefined,
     });
-  }, [deferredSearchQuery, filter, loadConversations]);
+  }, [deferredSearchQuery, filter, loadConversations, selectedLabelId]);
 
   useEffect(() => {
     const root = scrollAreaContainerRef.current?.querySelector('[data-slot="scroll-area-viewport"]');
@@ -170,6 +199,9 @@ export function ChatList({ className }: ChatListProps) {
     () =>
       conversations
         .filter(conv => {
+      if (selectedLabelId && !(conv.labels || []).some((label) => label.id === selectedLabelId)) {
+        return false;
+      }
       if (filter === 'unread') return conv.unreadCount > 0;
       if (filter === 'archived') return conv.isArchived;
       return !conv.isArchived;
@@ -179,7 +211,7 @@ export function ChatList({ className }: ChatListProps) {
           if (!a.isPinned && b.isPinned) return 1;
           return b.updatedAt.getTime() - a.updatedAt.getTime();
         }),
-    [conversations, filter]
+    [conversations, filter, selectedLabelId]
   );
   
   const searchFiltered = useMemo(
@@ -262,31 +294,67 @@ export function ChatList({ className }: ChatListProps) {
         </div>
         
         {/* Filter Tabs */}
-        <div className="flex items-center gap-2 mt-2">
+        <div className="mt-2 flex items-center gap-2">
           <Button
-            variant={filter === 'all' ? 'secondary' : 'ghost'}
+            variant={filter === 'all' && !selectedLabelId ? 'secondary' : 'ghost'}
             size="sm"
-            className="h-7 text-xs"
-            onClick={() => setFilter('all')}
+            className="h-7 shrink-0 text-xs"
+            onClick={() => {
+              setFilter('all');
+              setSelectedLabelId(null);
+            }}
           >
             All
           </Button>
-          <Button
-            variant={filter === 'unread' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setFilter('unread')}
-          >
-            Unread
-          </Button>
-          <Button
-            variant={filter === 'archived' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setFilter('archived')}
-          >
-            Archived
-          </Button>
+          <div className="min-w-0 flex-1 overflow-x-auto pb-1">
+            <div className="flex w-max items-center gap-2 pr-1">
+              <Button
+                variant={filter === 'unread' && !selectedLabelId ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setFilter('unread');
+                  setSelectedLabelId(null);
+                }}
+              >
+                Unread
+              </Button>
+              <Button
+                variant={filter === 'archived' && !selectedLabelId ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setFilter('archived');
+                  setSelectedLabelId(null);
+                }}
+              >
+                Archived
+              </Button>
+              {availableLabels.map((label) => {
+                const isActive = selectedLabelId === label.id;
+
+                return (
+                  <Button
+                    key={label.id}
+                    variant={isActive ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => {
+                      setFilter('all');
+                      setSelectedLabelId((current) => (current === label.id ? null : label.id));
+                    }}
+                    title={`${label.name} • ${label.phoneNumber}`}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: label.color }}
+                    />
+                    <span>{label.name}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
       

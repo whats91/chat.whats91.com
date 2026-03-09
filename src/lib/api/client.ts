@@ -5,6 +5,7 @@
  */
 
 import type { 
+  ChatLabelsResponse,
   ConversationListResponse, 
   ConversationDetailResponse,
   PinnedMessageResponse,
@@ -17,6 +18,7 @@ import type {
   StartConversationRequest,
   StartConversationResponse,
   UpdateConversationResponse,
+  UpdateConversationNotesResponse,
 } from '@/lib/types/chat';
 
 const API_BASE = '/api';
@@ -96,6 +98,7 @@ export async function fetchConversations(params: {
   status?: string;
   archived?: boolean;
   unreadOnly?: boolean;
+  labelId?: string;
 } = {}): Promise<ConversationListResponse> {
   const searchParams = new URLSearchParams();
   
@@ -105,11 +108,20 @@ export async function fetchConversations(params: {
   if (params.status) searchParams.set('status', params.status);
   if (params.archived) searchParams.set('archived', 'true');
   if (params.unreadOnly) searchParams.set('unreadOnly', 'true');
+  if (params.labelId) searchParams.set('labelId', params.labelId);
   
   const response = await fetch(`${API_BASE}/conversations?${searchParams.toString()}`, {
     headers: getHeaders(),
   });
   
+  return response.json();
+}
+
+export async function fetchChatLabels(): Promise<ChatLabelsResponse> {
+  const response = await fetch(`${API_BASE}/chat-labels`, {
+    headers: getHeaders(),
+  });
+
   return response.json();
 }
 
@@ -300,6 +312,19 @@ export async function updateConversationName(
   return response.json();
 }
 
+export async function updateConversationNotes(
+  conversationId: string | number,
+  conversationNotes: string
+): Promise<UpdateConversationNotesResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/notes`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ conversationNotes }),
+  });
+
+  return response.json();
+}
+
 export async function toggleMessagePinned(
   conversationId: string | number,
   messageId: string | number
@@ -449,7 +474,9 @@ export const api = {
     toggleArchive,
     togglePin,
     updateConversationName,
+    updateConversationNotes,
     fetchConversationLabels,
+    fetchChatLabels,
     updateConversationLabels,
     toggleMessagePinned,
     toggleMessageStarred,

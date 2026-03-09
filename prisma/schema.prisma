@@ -151,6 +151,7 @@ model Conversation {
   contactPhone          String    @map("contact_phone")
   contactId             Int?      @map("contact_id")
   contactName           String?   @map("contact_name")
+  conversationNotes     String?   @map("conversation_notes")
   whatsappPhoneNumberId String    @map("whatsapp_phone_number_id")
   phoneNumber           String?   @map("phone_number")
   

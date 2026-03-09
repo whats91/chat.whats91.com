@@ -55,6 +55,26 @@ export async function getChatLabelsByUserAndPhoneNumber(
   }
 }
 
+export async function getChatLabelsByUser(userId: string): Promise<ChatLabel[]> {
+  try {
+    const rows = await db.$queryRawUnsafe<ChatLabelRow[]>(
+      `SELECT id, uid, user_id, phone_number, label_name, color_code
+       FROM chat_labels
+       WHERE user_id = ?
+       ORDER BY phone_number ASC, label_name ASC, id ASC`,
+      userId
+    );
+
+    return rows.map(mapChatLabelRow);
+  } catch (error) {
+    log.error('getChatLabelsByUser error', {
+      error: error instanceof Error ? error.message : error,
+      userId,
+    });
+    throw error;
+  }
+}
+
 export async function getChatLabelsByIds(
   userId: string,
   labelIds: Array<string | number>

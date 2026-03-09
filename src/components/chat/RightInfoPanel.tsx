@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
 import {
@@ -33,7 +34,7 @@ interface RightInfoPanelProps {
 }
 
 export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
-  const { conversations, muteConversation, blockConversation, updateConversationName } = useChatStore();
+  const { conversations, muteConversation, blockConversation, updateConversationName, updateConversationNotes } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
@@ -43,12 +44,28 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [isNotesDirty, setIsNotesDirty] = useState(false);
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
 
   useEffect(() => {
     if (conversation && !isEditingName) {
       setNameDraft(conversation.contactName || '');
     }
   }, [conversation, isEditingName]);
+
+  useEffect(() => {
+    if (conversation) {
+      setNotesDraft(conversation.conversationNotes || '');
+      setIsNotesDirty(false);
+    }
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    if (conversation && !isNotesDirty) {
+      setNotesDraft(conversation.conversationNotes || '');
+    }
+  }, [conversation?.conversationNotes, isNotesDirty]);
 
   if (!conversation) {
     return null;
@@ -99,6 +116,28 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
       });
     } finally {
       setIsSavingName(false);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    try {
+      setIsSavingNotes(true);
+      await updateConversationNotes(conversation.id, notesDraft);
+      setIsNotesDirty(false);
+      toast({
+        title: 'Conversation notes updated',
+        description: notesDraft.trim()
+          ? 'Your note has been saved for this conversation.'
+          : 'The conversation note has been cleared.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Unable to update conversation notes',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingNotes(false);
     }
   };
   
@@ -175,6 +214,41 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
           <p className="text-sm text-muted-foreground">
             Hey there! I'm using WhatsApp
           </p>
+        </div>
+        
+        <Separator />
+
+        {/* Notes */}
+        <div className="p-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium">Notes</h3>
+            <span className="text-xs text-muted-foreground">
+              {notesDraft.trim().length} chars
+            </span>
+          </div>
+          <Textarea
+            value={notesDraft}
+            onChange={(event) => {
+              setNotesDraft(event.target.value);
+              setIsNotesDirty(true);
+            }}
+            placeholder="Add notes for this conversation..."
+            className="min-h-32 resize-none border-border/80 bg-background/85 text-foreground dark:text-white"
+            maxLength={5000}
+          />
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Saved notes stay attached to this conversation.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void handleSaveNotes()}
+              disabled={isSavingNotes || (!isNotesDirty && notesDraft === (conversation.conversationNotes || ''))}
+            >
+              {isSavingNotes ? 'Saving...' : 'Save note'}
+            </Button>
+          </div>
         </div>
         
         <Separator />

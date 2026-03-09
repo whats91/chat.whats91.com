@@ -112,6 +112,7 @@ export interface Conversation {
   contactPhone: string;
   contactId?: string | null;
   contactName?: string | null;
+  conversationNotes?: string | null;
   whatsappPhoneNumberId: string;
   isServiceWindowOpen: boolean;
   serviceWindowStartedAt?: Date | null;
@@ -395,6 +396,7 @@ export interface ConversationDetailResponse {
       displayName: string;
       contactPhone: string;
       contactName: string | null;
+      conversationNotes: string | null;
       isBlocked: boolean;
       isServiceWindowOpen: boolean;
       serviceWindowStartedAt: Date | string | null;
@@ -481,6 +483,14 @@ export interface ConversationLabelsResponse {
   } | null;
 }
 
+export interface ChatLabelsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    labels: ChatLabel[];
+  } | null;
+}
+
 export interface UpdateConversationResponse {
   success: boolean;
   message: string;
@@ -488,6 +498,15 @@ export interface UpdateConversationResponse {
     conversationId: string;
     contactName: string | null;
     displayName: string;
+  } | null;
+}
+
+export interface UpdateConversationNotesResponse {
+  success: boolean;
+  message: string;
+  data: {
+    conversationId: string;
+    conversationNotes: string | null;
   } | null;
 }
 

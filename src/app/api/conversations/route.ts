@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
       status: searchParams.get('status') || 'active',
       archived: searchParams.get('archived') === 'true',
       unreadOnly: searchParams.get('unreadOnly') === 'true',
+      labelId: searchParams.get('labelId') || undefined,
     });
     
     return NextResponse.json(result, { status: result.success ? 200 : 400 });

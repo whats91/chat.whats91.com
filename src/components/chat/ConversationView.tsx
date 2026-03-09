@@ -743,18 +743,17 @@ function ConversationHeader({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem>View contact</DropdownMenuItem>
+            <DropdownMenuItem onClick={onInfoClick}>
+              <Info className="h-4 w-4 mr-2" />
+              {isInfoOpen ? 'Close info' : 'View info'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onViewMedia}>Media, links, and docs</DropdownMenuItem>
             <DropdownMenuItem onClick={onSearchClick}>
               {isSearchOpen ? 'Close search' : 'Search'}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onMuteToggle}>
               {conversation.isMuted ? 'Unmute notifications' : 'Mute notifications'}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onInfoClick}>
-              <Info className="h-4 w-4 mr-2" />
-              {isInfoOpen ? 'Close info' : 'View info'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onPinToggle}>

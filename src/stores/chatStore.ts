@@ -22,6 +22,7 @@ import {
   togglePin as apiTogglePin,
   updateConversationLabels as apiUpdateConversationLabels,
   updateConversationName as apiUpdateConversationName,
+  updateConversationNotes as apiUpdateConversationNotes,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { debugPubSub } from '@/lib/pubsub/debug';
@@ -188,6 +189,7 @@ interface ConversationListQuery {
   unreadOnly: boolean;
   status: string;
   limit: number;
+  labelId: string;
 }
 
 interface LoadConversationsOptions extends Partial<ConversationListQuery> {
@@ -201,6 +203,7 @@ const DEFAULT_CONVERSATION_LIST_QUERY: ConversationListQuery = {
   unreadOnly: false,
   status: 'active',
   limit: 20,
+  labelId: '',
 };
 
 function toConversationDate(value: Date | string | null | undefined): Date {
@@ -256,6 +259,7 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
     userId: getCurrentUserId(),
     contactPhone: conv.contactPhone,
     contactName: conv.contactName,
+    conversationNotes: null,
     labels: conv.labels || [],
     whatsappPhoneNumberId: '',
     isServiceWindowOpen: true,
@@ -365,6 +369,7 @@ interface ChatState {
   muteConversation: (id: string) => Promise<void>;
   blockConversation: (id: string) => Promise<void>;
   updateConversationName: (id: string, contactName: string) => Promise<void>;
+  updateConversationNotes: (id: string, conversationNotes: string) => Promise<void>;
   updateConversationLabels: (id: string, labels: string[]) => Promise<void>;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -422,6 +427,7 @@ export const useChatStore = create<ChatState>()(
           unreadOnly: options.unreadOnly ?? state.conversationListQuery.unreadOnly,
           status: options.status ?? state.conversationListQuery.status,
           limit: options.limit ?? state.conversationListQuery.limit,
+          labelId: options.labelId ?? state.conversationListQuery.labelId,
         };
 
         set({ isLoadingConversations: true, conversationsError: null });
@@ -434,6 +440,7 @@ export const useChatStore = create<ChatState>()(
             archived: query.archived,
             unreadOnly: query.unreadOnly,
             status: query.status,
+            labelId: query.labelId || undefined,
           });
           
           if (response.success && response.data) {
@@ -531,6 +538,7 @@ export const useChatStore = create<ChatState>()(
                     ? {
                         ...conversation,
                         contactName: response.data.conversation.contactName,
+                        conversationNotes: response.data.conversation.conversationNotes,
                         labels: response.data.conversation.labels || [],
                         isBlocked: response.data.conversation.isBlocked,
                         isServiceWindowOpen: response.data.conversation.isServiceWindowOpen,
@@ -640,6 +648,7 @@ export const useChatStore = create<ChatState>()(
               userId: getCurrentUserId(),
               contactPhone: participantPhone,
               contactName: contactName || null,
+              conversationNotes: null,
               labels: [],
               whatsappPhoneNumberId: '',
               isServiceWindowOpen: true,
@@ -914,6 +923,31 @@ export const useChatStore = create<ChatState>()(
         }
       },
 
+      updateConversationNotes: async (id, conversationNotes) => {
+        try {
+          const response = await apiUpdateConversationNotes(id, conversationNotes);
+          if (!response.success || !response.data) {
+            throw new Error(response.message || 'Failed to update conversation notes');
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((conversation) =>
+              conversation.id === id
+                ? {
+                    ...conversation,
+                    conversationNotes: response.data?.conversationNotes ?? null,
+                  }
+                : conversation
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update conversation notes',
+          });
+          throw error;
+        }
+      },
+
       updateConversationLabels: async (id, labelIds) => {
         try {
           const response = await apiUpdateConversationLabels(id, labelIds);
@@ -1117,6 +1151,7 @@ export const useChatStore = create<ChatState>()(
                 lastMessageDirection: normalizedMessage.direction,
                 unreadCount: normalizedMessage.direction === 'inbound' ? 1 : 0,
                 totalMessages: newMap.get(conversationKey)?.length || 1,
+                conversationNotes: null,
                 labels: [],
                 isPinned: false,
                 isArchived: false,
