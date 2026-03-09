@@ -28,6 +28,8 @@ import { getCurrentUserId } from '@/lib/config/current-user';
 import { debugPubSub } from '@/lib/pubsub/debug';
 
 const SERVICE_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
+let conversationListRequestSequence = 0;
+let activeConversationListAbortController: AbortController | null = null;
 
 function parseTimestampCandidate(value: Message['timestamp'] | string | number | null | undefined): Date | null {
   if (value instanceof Date) {
@@ -429,6 +431,14 @@ export const useChatStore = create<ChatState>()(
           limit: options.limit ?? state.conversationListQuery.limit,
           labelId: options.labelId ?? state.conversationListQuery.labelId,
         };
+        const requestId = ++conversationListRequestSequence;
+
+        if (activeConversationListAbortController) {
+          activeConversationListAbortController.abort();
+        }
+
+        const abortController = new AbortController();
+        activeConversationListAbortController = abortController;
 
         set({ isLoadingConversations: true, conversationsError: null });
         
@@ -441,7 +451,12 @@ export const useChatStore = create<ChatState>()(
             unreadOnly: query.unreadOnly,
             status: query.status,
             labelId: query.labelId || undefined,
+            signal: abortController.signal,
           });
+
+          if (abortController.signal.aborted || requestId !== conversationListRequestSequence) {
+            return;
+          }
           
           if (response.success && response.data) {
             const incomingConversations = response.data.conversations.map(mapConversationListItemToConversation);
@@ -458,16 +473,28 @@ export const useChatStore = create<ChatState>()(
               isLoadingConversations: false,
             }));
           } else {
+            if (requestId !== conversationListRequestSequence) {
+              return;
+            }
+
             set({ 
               conversationsError: response.message || 'Failed to load conversations',
               isLoadingConversations: false 
             });
           }
         } catch (error) {
+          if (abortController.signal.aborted || requestId !== conversationListRequestSequence) {
+            return;
+          }
+
           set({ 
             conversationsError: error instanceof Error ? error.message : 'Unknown error',
             isLoadingConversations: false 
           });
+        } finally {
+          if (requestId === conversationListRequestSequence) {
+            activeConversationListAbortController = null;
+          }
         }
       },
 

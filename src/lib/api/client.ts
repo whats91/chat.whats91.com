@@ -99,6 +99,7 @@ export async function fetchConversations(params: {
   archived?: boolean;
   unreadOnly?: boolean;
   labelId?: string;
+  signal?: AbortSignal;
 } = {}): Promise<ConversationListResponse> {
   const searchParams = new URLSearchParams();
   
@@ -112,6 +113,8 @@ export async function fetchConversations(params: {
   
   const response = await fetch(`${API_BASE}/conversations?${searchParams.toString()}`, {
     headers: getHeaders(),
+    cache: 'no-store',
+    signal: params.signal,
   });
   
   return response.json();
