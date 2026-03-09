@@ -527,6 +527,7 @@ export function AppShell() {
           messageId: event.data.messageId,
           status: event.data.status,
           conversationId: event.data.conversationId,
+          timestamp: event.data.timestamp,
         });
         void maybeShowStatusNotification(
           event.data.messageId,
@@ -544,6 +545,7 @@ export function AppShell() {
           messageId: payload.messageId,
           status: payload.status,
           conversationId: payload.conversationId || '0',
+          timestamp: payload.timestamp || payload.processedAt || null,
         });
         void maybeShowStatusNotification(
           payload.messageId,

@@ -81,6 +81,33 @@ function getMessageSortDate(message: Message): Date {
   );
 }
 
+function getStatusProgressRank(status: Message['status']): number {
+  switch (status) {
+    case 'read':
+      return 4;
+    case 'delivered':
+      return 3;
+    case 'failed':
+      return 2;
+    case 'sent':
+      return 1;
+    case 'pending':
+    default:
+      return 0;
+  }
+}
+
+function shouldApplyStatusUpdate(
+  currentStatus: Message['status'],
+  nextStatus: Message['status']
+): boolean {
+  if (currentStatus === nextStatus) {
+    return true;
+  }
+
+  return getStatusProgressRank(nextStatus) >= getStatusProgressRank(currentStatus);
+}
+
 function compareMessages(left: Message, right: Message): number {
   const timestampDiff = getMessageSortDate(left).getTime() - getMessageSortDate(right).getTime();
   if (timestampDiff !== 0) {
@@ -349,7 +376,12 @@ interface ChatState {
   
   // Real-time updates
   handleNewMessage: (data: { conversationId: string | number; message: Message }) => void;
-  handleStatusUpdate: (data: { messageId: string; status: string; conversationId: string | number }) => void;
+  handleStatusUpdate: (data: {
+    messageId: string;
+    status: string;
+    conversationId: string | number;
+    timestamp?: string | number | Date | null;
+  }) => void;
   
   // Getters
   getSelectedConversation: () => Conversation | null;
@@ -1057,7 +1089,7 @@ export const useChatStore = create<ChatState>()(
       
       // Handle status update from socket
       handleStatusUpdate: (data) => {
-        const { messageId, status, conversationId } = data;
+        const { messageId, status, conversationId, timestamp } = data;
         debugPubSub('Store handling status update', {
           conversationId: String(conversationId),
           messageId,
@@ -1092,7 +1124,30 @@ export const useChatStore = create<ChatState>()(
           const messages = newMap.get(resolvedConversationId) || [];
           const updatedMessages = messages.map((m) =>
             m.whatsappMessageId === messageId
-              ? { ...m, status: status as Message['status'] }
+              ? (() => {
+                  const nextStatus = status as Message['status'];
+                  if (!shouldApplyStatusUpdate(m.status, nextStatus)) {
+                    return m;
+                  }
+
+                  const statusTimestamp = parseTimestampCandidate(timestamp) || null;
+
+                  return {
+                    ...m,
+                    status: nextStatus,
+                    isRead: nextStatus === 'read' ? true : m.isRead,
+                    readAt:
+                      nextStatus === 'read'
+                        ? statusTimestamp || m.readAt || null
+                        : m.readAt || null,
+                    metadata: {
+                      ...(m.metadata || {}),
+                      statusTimestamp: statusTimestamp
+                        ? statusTimestamp.toISOString()
+                        : m.metadata?.statusTimestamp,
+                    },
+                  };
+                })()
               : m
           );
           newMap.set(resolvedConversationId, updatedMessages);

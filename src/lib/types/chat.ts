@@ -87,6 +87,7 @@ export interface Message {
     duration?: number;
     thumbnail?: string;
     sortTimestamp?: string | Date;
+    statusTimestamp?: string | Date;
   };
 }
 

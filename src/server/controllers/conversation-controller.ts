@@ -195,9 +195,61 @@ type LatestMessageHistoryStatus = {
   rawStatus: string;
   errorMessage: string | null;
   timestamp: Date | null;
+  historyId: number;
 };
 
-function extractLatestMessageHistoryStatus(payload: unknown): LatestMessageHistoryStatus | null {
+function getMessageStatusProgressRank(status: MessageStatus): number {
+  switch (status) {
+    case 'read':
+      return 4;
+    case 'delivered':
+      return 3;
+    case 'failed':
+      return 2;
+    case 'sent':
+      return 1;
+    case 'pending':
+    default:
+      return 0;
+  }
+}
+
+function shouldApplyMessageStatusUpdate(
+  currentStatus: MessageStatus,
+  nextStatus: MessageStatus
+): boolean {
+  if (currentStatus === nextStatus) {
+    return true;
+  }
+
+  return getMessageStatusProgressRank(nextStatus) >= getMessageStatusProgressRank(currentStatus);
+}
+
+function shouldPreferHistoryStatus(
+  currentStatus: LatestMessageHistoryStatus,
+  nextStatus: LatestMessageHistoryStatus
+): boolean {
+  const currentRank = getMessageStatusProgressRank(currentStatus.status);
+  const nextRank = getMessageStatusProgressRank(nextStatus.status);
+
+  if (nextRank !== currentRank) {
+    return nextRank > currentRank;
+  }
+
+  const currentTimestamp = currentStatus.timestamp?.getTime() ?? 0;
+  const nextTimestamp = nextStatus.timestamp?.getTime() ?? 0;
+
+  if (nextTimestamp !== currentTimestamp) {
+    return nextTimestamp > currentTimestamp;
+  }
+
+  return nextStatus.historyId > currentStatus.historyId;
+}
+
+function extractLatestMessageHistoryStatus(
+  payload: unknown,
+  historyId: number
+): LatestMessageHistoryStatus | null {
   const parsedPayload = parseJsonObject(payload);
   if (!parsedPayload) {
     return null;
@@ -217,6 +269,7 @@ function extractLatestMessageHistoryStatus(payload: unknown): LatestMessageHisto
     rawStatus,
     errorMessage,
     timestamp: parseHistoryTimestamp(parsedPayload.timestamp),
+    historyId,
   };
 }
 
@@ -255,24 +308,23 @@ async function getLatestMessageHistoryStatusMap(
   }>(
     `SELECT cmh.id, cmh.whatsapp_message_id, cmh.payload
      FROM conversation_message_history cmh
-     INNER JOIN (
-       SELECT whatsapp_message_id, MAX(id) AS latest_id
-       FROM conversation_message_history
-       WHERE whatsapp_message_id IN (${placeholders})
-       GROUP BY whatsapp_message_id
-     ) latest ON latest.latest_id = cmh.id`,
+     WHERE cmh.whatsapp_message_id IN (${placeholders})
+     ORDER BY cmh.id ASC`,
     normalizedMessageIds
   );
 
   const statusMap = new Map<string, LatestMessageHistoryStatus>();
 
   for (const row of historyRows) {
-    const latestStatus = extractLatestMessageHistoryStatus(row.payload);
+    const latestStatus = extractLatestMessageHistoryStatus(row.payload, row.id);
     if (!latestStatus) {
       continue;
     }
 
-    statusMap.set(row.whatsapp_message_id, latestStatus);
+    const currentStatus = statusMap.get(row.whatsapp_message_id);
+    if (!currentStatus || shouldPreferHistoryStatus(currentStatus, latestStatus)) {
+      statusMap.set(row.whatsapp_message_id, latestStatus);
+    }
   }
 
   return statusMap;
@@ -305,6 +357,12 @@ async function applyMessageHistoryStatuses(messages: Message[]): Promise<Message
       errorMessage: latestStatus.errorMessage || message.errorMessage,
       isRead,
       readAt,
+      metadata: {
+        ...(message.metadata || {}),
+        statusTimestamp: latestStatus.timestamp
+          ? latestStatus.timestamp.toISOString()
+          : message.metadata?.statusTimestamp,
+      },
     };
   });
 }
@@ -2355,20 +2413,28 @@ export async function updateMessageStatus(
       }
     }
 
-    await executeConversationsDb(
-      `UPDATE conversation_messages SET status = ?, error_message = ?, updated_at = datetime('now') WHERE whatsapp_message_id = ?`,
-      [status, errorMessage || null, whatsappMessageId]
-    );
-    
-    // Get conversation for pub/sub
     const [message] = await queryConversationsDb<any>(
       `SELECT cm.*, c.user_id FROM conversation_messages cm 
        JOIN conversations c ON cm.conversation_id = c.id 
        WHERE cm.whatsapp_message_id = ?`,
       [whatsappMessageId]
     );
+
+    if (!message) {
+      return { success: true };
+    }
+
+    const currentStatus = mapConversationMessageStatus(String(message.status || 'pending'));
+    const shouldApply = shouldApplyMessageStatusUpdate(currentStatus, status);
+
+    if (shouldApply) {
+      await executeConversationsDb(
+        `UPDATE conversation_messages SET status = ?, error_message = ?, updated_at = datetime('now') WHERE whatsapp_message_id = ?`,
+        [status, errorMessage || null, whatsappMessageId]
+      );
+    }
     
-    if (message) {
+    if (shouldApply) {
       await publishStatusUpdate(message.user_id, {
         messageId: whatsappMessageId,
         conversationId: message.conversation_id,
