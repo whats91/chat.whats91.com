@@ -268,7 +268,7 @@ async function getConversationServiceWindowState(
   const [lastInboundMessage] = await queryConversationsDb<{
     lastInboundMessageAt: Date | string | null;
   }>(
-    `SELECT COALESCE(created_at, timestamp) AS lastInboundMessageAt
+    `SELECT COALESCE(cm.created_at, cm.timestamp) AS lastInboundMessageAt
      FROM conversation_messages cm
      INNER JOIN conversations c ON c.id = cm.conversation_id
      WHERE cm.conversation_id = ? AND c.user_id = ? AND cm.direction = 'inbound'
