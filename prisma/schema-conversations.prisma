@@ -29,6 +29,7 @@ model Conversation {
   contactId             BigInt?   @map("contact_id")
   contactName           String?   @map("contact_name")
   whatsappPhoneNumberId String    @map("whatsapp_phone_number_id")
+  phoneNumber           String?   @map("phone_number") @db.VarChar(25)
   
   // Last Message Info
   lastMessageId         String?   @map("last_message_id")

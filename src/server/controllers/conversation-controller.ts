@@ -139,6 +139,7 @@ function isConversationBlocked(value: unknown): boolean {
 interface ResolvedConversationSendContext {
   conversation: any;
   resolvedPhoneNumberId: string;
+  resolvedPhoneNumber: string | null;
   accessToken: string;
 }
 
@@ -171,6 +172,7 @@ async function resolveConversationSendContext(
   let resolvedPhoneNumberId = conversation.whatsapp_phone_number_id
     ? String(conversation.whatsapp_phone_number_id)
     : null;
+  let resolvedPhoneNumber = conversation.phone_number ? String(conversation.phone_number) : null;
   let cloudSetup = resolvedPhoneNumberId
     ? await findCloudApiSetupByUserAndPhoneNumberId(userId, resolvedPhoneNumberId)
     : null;
@@ -184,17 +186,11 @@ async function resolveConversationSendContext(
     if (fallbackSetup?.phoneNumberId && fallbackSetup.whatsappAccessToken) {
       cloudSetup = fallbackSetup;
       resolvedPhoneNumberId = fallbackSetup.phoneNumberId;
-
-      if (String(conversation.whatsapp_phone_number_id || '') !== fallbackSetup.phoneNumberId) {
-        await executeConversationsDb(
-          `UPDATE conversations
-           SET whatsapp_phone_number_id = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND user_id = ?`,
-          [fallbackSetup.phoneNumberId, conversationId, userId]
-        );
-        conversation.whatsapp_phone_number_id = fallbackSetup.phoneNumberId;
-      }
     }
+  }
+
+  if (cloudSetup?.phoneNumber) {
+    resolvedPhoneNumber = cloudSetup.phoneNumber;
   }
 
   const accessToken = cloudSetup?.whatsappAccessToken || envAccessToken;
@@ -202,8 +198,28 @@ async function resolveConversationSendContext(
     resolvedPhoneNumberId = envPhoneNumberId;
   }
 
-  if (!conversation.whatsapp_phone_number_id && resolvedPhoneNumberId) {
+  const conversationUpdates: string[] = [];
+  const conversationUpdateParams: unknown[] = [];
+
+  if (resolvedPhoneNumberId && String(conversation.whatsapp_phone_number_id || '') !== resolvedPhoneNumberId) {
+    conversationUpdates.push('whatsapp_phone_number_id = ?');
+    conversationUpdateParams.push(resolvedPhoneNumberId);
     conversation.whatsapp_phone_number_id = resolvedPhoneNumberId;
+  }
+
+  if (resolvedPhoneNumber && String(conversation.phone_number || '') !== resolvedPhoneNumber) {
+    conversationUpdates.push('phone_number = ?');
+    conversationUpdateParams.push(resolvedPhoneNumber);
+    conversation.phone_number = resolvedPhoneNumber;
+  }
+
+  if (conversationUpdates.length > 0) {
+    await executeConversationsDb(
+      `UPDATE conversations
+       SET ${conversationUpdates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [...conversationUpdateParams, conversationId, userId]
+    );
   }
 
   if (!accessToken || !resolvedPhoneNumberId) {
@@ -218,6 +234,7 @@ async function resolveConversationSendContext(
     data: {
       conversation,
       resolvedPhoneNumberId,
+      resolvedPhoneNumber,
       accessToken,
     },
   };
@@ -695,9 +712,9 @@ export async function startConversation({
 
     await executeConversationsDb(
       `INSERT INTO conversations
-       (user_id, contact_phone, contact_name, whatsapp_phone_number_id, status, unread_count, total_messages, is_archived, is_pinned, is_muted, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', 0, 0, false, false, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [userId, normalizedPhone, trimmedContactName, setup.phoneNumberId]
+       (user_id, contact_phone, contact_name, whatsapp_phone_number_id, phone_number, status, unread_count, total_messages, is_archived, is_pinned, is_muted, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'active', 0, 0, false, false, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [userId, normalizedPhone, trimmedContactName, setup.phoneNumberId, setup.phoneNumber]
     );
 
     [conversation] = await queryConversationsDb<any>(
@@ -960,63 +977,16 @@ export async function sendMessage({
     let persistedMediaUrl = messageData.mediaUrl || null;
     let resolvedMediaMimeType: string | null = null;
     let resolvedMediaFilename: string | null = null;
-
-    // Get conversation
-    const [conversation] = await queryConversationsDb<any>(
-      `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
-      [conversationId, userId]
-    );
-    
-    if (!conversation) {
+    const sendContext = await resolveConversationSendContext(conversationId, userId);
+    if (!sendContext.success) {
       return {
         success: false,
-        message: 'Conversation not found',
+        message: sendContext.message,
         data: null,
       };
     }
 
-    if (isConversationBlocked(conversation.is_blocked)) {
-      return {
-        success: false,
-        message: 'This contact is blocked. Unblock the contact to send messages.',
-        data: null,
-      };
-    }
-    
-    // Get CloudApiSetup for this user
-    let resolvedPhoneNumberId = conversation.whatsapp_phone_number_id
-      ? String(conversation.whatsapp_phone_number_id)
-      : null;
-    let cloudSetup = resolvedPhoneNumberId
-      ? await findCloudApiSetupByUserAndPhoneNumberId(userId, resolvedPhoneNumberId)
-      : null;
-
-    if (!cloudSetup?.whatsappAccessToken) {
-      const fallbackSetup = await findDefaultCloudApiSetupByUser(userId);
-
-      if (fallbackSetup?.phoneNumberId && fallbackSetup.whatsappAccessToken) {
-        cloudSetup = fallbackSetup;
-        resolvedPhoneNumberId = fallbackSetup.phoneNumberId;
-
-        if (String(conversation.whatsapp_phone_number_id || '') !== fallbackSetup.phoneNumberId) {
-          await executeConversationsDb(
-            `UPDATE conversations
-             SET whatsapp_phone_number_id = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND user_id = ?`,
-            [fallbackSetup.phoneNumberId, conversationId, userId]
-          );
-          conversation.whatsapp_phone_number_id = fallbackSetup.phoneNumberId;
-        }
-      }
-    }
-
-    if (!cloudSetup || !cloudSetup.whatsappAccessToken || !resolvedPhoneNumberId) {
-      return {
-        success: false,
-        message: 'WhatsApp configuration not found for this phone number',
-        data: null,
-      };
-    }
+    const { conversation, resolvedPhoneNumberId, accessToken } = sendContext.data;
 
     if (messageData.mediaUploadToken) {
       const pendingUpload = await resolvePendingConversationMediaUpload({
@@ -1116,7 +1086,7 @@ export async function sendMessage({
     // Send to Meta
     const sendResult = await sendMessageToMeta({
       messagePayload,
-      accessToken: cloudSetup.whatsappAccessToken,
+      accessToken,
       phoneNumberId: resolvedPhoneNumberId,
       options: {
         userId,

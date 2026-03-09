@@ -46,6 +46,7 @@ export interface Conversation {
   contactId: bigint | null;
   contactName: string | null;
   whatsappPhoneNumberId: string;
+  phoneNumber: string | null;
   lastMessageId: string | null;
   lastMessageContent: string | null;
   lastMessageType: string | null;

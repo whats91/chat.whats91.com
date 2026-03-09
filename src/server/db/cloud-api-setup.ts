@@ -9,6 +9,7 @@ const ALGORITHM = 'aes-256-gcm';
 interface CloudApiSetupRow {
   user_id: string | number | bigint;
   phone_number_id: string | number | bigint | null;
+  phone_number: string | null;
   whatsapp_access_token: string | null;
   access_chats: boolean | number | null;
 }
@@ -16,6 +17,7 @@ interface CloudApiSetupRow {
 export interface CloudApiSetupRecord {
   userId: string;
   phoneNumberId: string | null;
+  phoneNumber: string | null;
   whatsappAccessToken: string | null;
   accessChats: boolean;
 }
@@ -88,6 +90,7 @@ function normalizeCloudApiSetup(row: CloudApiSetupRow | undefined): CloudApiSetu
   return {
     userId: String(row.user_id),
     phoneNumberId: row.phone_number_id == null ? null : String(row.phone_number_id),
+    phoneNumber: row.phone_number || null,
     whatsappAccessToken: decryptAccessTokenIfNeeded(row.whatsapp_access_token),
     accessChats: row.access_chats === true || row.access_chats === 1,
   };
@@ -98,7 +101,7 @@ export async function findCloudApiSetupByUserAndPhoneNumberId(
   phoneNumberId: string
 ): Promise<CloudApiSetupRecord | null> {
   const rows = await db.$queryRawUnsafe<CloudApiSetupRow[]>(
-    `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
+    `SELECT user_id, phone_number_id, phone_number, whatsapp_access_token, access_chats
      FROM cloud_api_setup
      WHERE user_id = ? AND phone_number_id = ?
      ORDER BY (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') DESC, access_chats DESC, id DESC
@@ -114,7 +117,7 @@ export async function findCloudApiSetupByPhoneNumberId(
   phoneNumberId: string
 ): Promise<CloudApiSetupRecord | null> {
   const rows = await db.$queryRawUnsafe<CloudApiSetupRow[]>(
-    `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
+    `SELECT user_id, phone_number_id, phone_number, whatsapp_access_token, access_chats
      FROM cloud_api_setup
      WHERE phone_number_id = ?
      ORDER BY (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') DESC, access_chats DESC, id DESC
@@ -129,7 +132,7 @@ export async function findDefaultCloudApiSetupByUser(
   userId: string
 ): Promise<CloudApiSetupRecord | null> {
   const rows = await db.$queryRawUnsafe<CloudApiSetupRow[]>(
-    `SELECT user_id, phone_number_id, whatsapp_access_token, access_chats
+    `SELECT user_id, phone_number_id, phone_number, whatsapp_access_token, access_chats
      FROM cloud_api_setup
      WHERE user_id = ? AND phone_number_id IS NOT NULL
      ORDER BY (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') DESC, access_chats DESC, updated_at DESC, id DESC
