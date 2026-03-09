@@ -13,7 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageBubbleContent } from '@/components/chat/MessageBubbleContent';
+import { MessageBubbleContent, canRenderInlineMessageMeta } from '@/components/chat/MessageBubbleContent';
 import {
   exportConversationToExcel,
   fetchPinnedMessage,
@@ -39,8 +39,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
-  Phone,
-  Video,
   Search,
   MoreVertical,
   ArrowLeft,
@@ -724,24 +722,6 @@ function ConversationHeader({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Video className="h-5 w-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Video call</TooltipContent>
-          </Tooltip>
-          
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Phone className="h-5 w-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Voice call</TooltipContent>
-          </Tooltip>
-          
-          <Tooltip>
-            <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onSearchClick}>
                 <Search className="h-5 w-5" />
               </Button>
@@ -1100,6 +1080,18 @@ function MessageBubble({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+  const shouldRenderInlineMeta = showTimestamp && canRenderInlineMessageMeta(message);
+  const messageMeta = showTimestamp ? (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 text-[11px] leading-none',
+        isOwn ? 'text-[var(--bubble-out-muted)]' : 'text-[var(--bubble-in-muted)]'
+      )}
+    >
+      <span>{formatTimeInIst(message.timestamp)}</span>
+      {isOwn ? renderStatusIcon() : null}
+    </span>
+  ) : null;
   
   return (
     <div
@@ -1142,16 +1134,20 @@ function MessageBubble({
             ) : null}
           </div>
         ) : null}
-        <MessageBubbleContent message={message} isOwn={isOwn} onOpenMedia={onOpenMedia} />
-        {showTimestamp && (
+        <MessageBubbleContent
+          message={message}
+          isOwn={isOwn}
+          onOpenMedia={onOpenMedia}
+          inlineMeta={shouldRenderInlineMeta ? messageMeta : undefined}
+        />
+        {showTimestamp && !shouldRenderInlineMeta && (
           <div
             className={cn(
               'flex items-center justify-end gap-1 mt-1 text-xs',
               isOwn ? 'text-[var(--bubble-out-muted)]' : 'text-[var(--bubble-in-muted)]'
             )}
           >
-            <span>{formatTimeInIst(message.timestamp)}</span>
-            {isOwn && renderStatusIcon()}
+            {messageMeta}
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Badge } from '@/components/ui/badge';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
@@ -24,6 +24,7 @@ interface MessageBubbleContentProps {
   message: Message;
   isOwn: boolean;
   onOpenMedia?: (message: Message) => void;
+  inlineMeta?: ReactNode;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -154,15 +155,28 @@ function extractInteractiveSections(action: unknown): InteractiveSection[] {
 function RichText({
   text,
   className,
+  inlineMeta,
 }: {
   text: string;
   className?: string;
+  inlineMeta?: ReactNode;
 }) {
+  const formattedText = formatWhatsAppText(text);
+
   return (
     <div
       className={cn('text-sm whitespace-pre-wrap break-words leading-6', className)}
-      dangerouslySetInnerHTML={{ __html: formatWhatsAppText(text) }}
-    />
+    >
+      <span dangerouslySetInnerHTML={{ __html: formattedText }} />
+      {inlineMeta ? (
+        <>
+          <span aria-hidden="true" className="inline-block w-12 select-none sm:w-14" />
+          <span className="float-right ml-2 mt-[0.35rem] inline-flex items-center gap-1 whitespace-nowrap align-bottom text-[11px] leading-none">
+            {inlineMeta}
+          </span>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -628,14 +642,16 @@ function InteractiveContent({
   interactiveData,
   isOwn,
   showTemplateBadge = false,
+  inlineMeta,
 }: {
   content: string;
   interactiveData: JsonObject | null;
   isOwn: boolean;
   showTemplateBadge?: boolean;
+  inlineMeta?: ReactNode;
 }) {
   if (!interactiveData) {
-    return isMeaningfulText(content) ? <RichText text={content} className="text-inherit" /> : null;
+    return isMeaningfulText(content) ? <RichText text={content} className="text-inherit" inlineMeta={inlineMeta} /> : null;
   }
 
   const interactiveType = String(interactiveData.type || '').toLowerCase();
@@ -686,7 +702,7 @@ function InteractiveContent({
   );
 }
 
-export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBubbleContentProps) {
+export function MessageBubbleContent({ message, isOwn, onOpenMedia, inlineMeta }: MessageBubbleContentProps) {
   const resolved = resolveMessageForRendering(message);
   const caption = getMessageCaption(resolved.content, resolved.mediaCaption);
 
@@ -750,7 +766,7 @@ export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBub
     case 'button':
     case 'button_reply':
     case 'list_reply':
-      return <InteractiveContent content={resolved.content} interactiveData={resolved.interactiveData} isOwn={isOwn} />;
+      return <InteractiveContent content={resolved.content} interactiveData={resolved.interactiveData} isOwn={isOwn} inlineMeta={inlineMeta} />;
 
     case 'template':
       return (
@@ -759,6 +775,7 @@ export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBub
           interactiveData={resolved.interactiveData}
           isOwn={isOwn}
           showTemplateBadge
+          inlineMeta={inlineMeta}
         />
       );
 
@@ -775,7 +792,7 @@ export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBub
           className={STANDARD_MEDIA_CARD_CLASS}
         />
       ) : isMeaningfulText(resolved.content) ? (
-        <RichText text={resolved.content} className="text-inherit" />
+        <RichText text={resolved.content} className="text-inherit" inlineMeta={inlineMeta} />
       ) : (
         <AttachmentFallback
           icon={FileText}
@@ -789,7 +806,7 @@ export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBub
     case 'text':
     default:
       return isMeaningfulText(resolved.content) ? (
-        <RichText text={resolved.content} className="text-inherit" />
+        <RichText text={resolved.content} className="text-inherit" inlineMeta={inlineMeta} />
       ) : (
         <AttachmentFallback
           icon={FileText}
@@ -799,5 +816,18 @@ export function MessageBubbleContent({ message, isOwn, onOpenMedia }: MessageBub
           className={STANDARD_MEDIA_CARD_CLASS}
         />
       );
+  }
+}
+
+export function canRenderInlineMessageMeta(message: Message): boolean {
+  const resolved = resolveMessageForRendering(message);
+
+  switch (resolved.type) {
+    case 'text':
+      return isMeaningfulText(resolved.content);
+    case 'unknown':
+      return !resolved.mediaUrl && isMeaningfulText(resolved.content);
+    default:
+      return false;
   }
 }

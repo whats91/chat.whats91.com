@@ -20,6 +20,7 @@ import {
   toggleMessageStarred as apiToggleMessageStarred,
   toggleMute as apiToggleMute,
   togglePin as apiTogglePin,
+  updateConversationName as apiUpdateConversationName,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { mockLabels } from '@/lib/mock/data';
@@ -369,6 +370,7 @@ interface ChatState {
   archiveConversation: (id: string) => Promise<void>;
   muteConversation: (id: string) => Promise<void>;
   blockConversation: (id: string) => Promise<void>;
+  updateConversationName: (id: string, contactName: string) => Promise<void>;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   toggleMessagePinned: (conversationId: string, messageId: string) => Promise<void>;
@@ -534,6 +536,7 @@ export const useChatStore = create<ChatState>()(
                   conversation.id === conversationId
                     ? {
                         ...conversation,
+                        contactName: response.data.conversation.contactName,
                         isBlocked: response.data.conversation.isBlocked,
                         isServiceWindowOpen: response.data.conversation.isServiceWindowOpen,
                         serviceWindowStartedAt: response.data.conversation.serviceWindowStartedAt
@@ -543,6 +546,18 @@ export const useChatStore = create<ChatState>()(
                           ? toMessageDate(response.data.conversation.serviceWindowExpiresAt)
                           : null,
                         status: response.data.conversation.status,
+                        participant: conversation.participant
+                          ? {
+                              ...conversation.participant,
+                              name: response.data.conversation.displayName,
+                            }
+                          : {
+                              id: conversation.id,
+                              name: response.data.conversation.displayName,
+                              phone: response.data.conversation.contactPhone,
+                              status: 'offline',
+                              avatar: undefined,
+                            },
                       }
                     : conversation
                 ),
@@ -858,6 +873,48 @@ export const useChatStore = create<ChatState>()(
           set({
             conversationsError: error instanceof Error ? error.message : 'Failed to update block state',
           });
+        }
+      },
+
+      updateConversationName: async (id, contactName) => {
+        try {
+          const trimmedContactName = contactName.trim();
+          if (!trimmedContactName) {
+            throw new Error('Conversation name cannot be empty');
+          }
+
+          const response = await apiUpdateConversationName(id, trimmedContactName);
+          if (!response.success || !response.data) {
+            throw new Error(response.message || 'Failed to update conversation name');
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((conversation) =>
+              conversation.id === id
+                ? {
+                    ...conversation,
+                    contactName: response.data?.contactName ?? trimmedContactName,
+                    participant: conversation.participant
+                      ? {
+                          ...conversation.participant,
+                          name: response.data?.displayName ?? trimmedContactName,
+                        }
+                      : {
+                          id: conversation.id,
+                          name: response.data?.displayName ?? trimmedContactName,
+                          phone: conversation.contactPhone,
+                          status: 'offline',
+                          avatar: undefined,
+                        },
+                  }
+                : conversation
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update conversation name',
+          });
+          throw error;
         }
       },
       

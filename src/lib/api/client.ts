@@ -15,6 +15,7 @@ import type {
   SendMessageResponse,
   StartConversationRequest,
   StartConversationResponse,
+  UpdateConversationResponse,
 } from '@/lib/types/chat';
 
 const API_BASE = '/api';
@@ -285,6 +286,19 @@ export async function togglePin(conversationId: string | number): Promise<{ succ
   return response.json();
 }
 
+export async function updateConversationName(
+  conversationId: string | number,
+  contactName: string
+): Promise<UpdateConversationResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ contactName }),
+  });
+
+  return response.json();
+}
+
 export async function toggleMessagePinned(
   conversationId: string | number,
   messageId: string | number
@@ -410,6 +424,7 @@ export const api = {
     toggleBlock,
     toggleArchive,
     togglePin,
+    updateConversationName,
     toggleMessagePinned,
     toggleMessageStarred,
     clear: clearConversation,

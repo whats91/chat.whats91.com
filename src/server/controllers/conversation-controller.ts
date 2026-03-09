@@ -2017,6 +2017,60 @@ export async function toggleBlockConversation(conversationId: number, userId: st
 }
 
 // ========================================
+// UPDATE CONVERSATION NAME
+// ========================================
+
+export async function updateConversationName(
+  conversationId: number,
+  userId: string,
+  contactName: string
+) {
+  try {
+    const trimmedContactName = contactName.trim();
+
+    if (!trimmedContactName) {
+      return { success: false, message: 'Conversation name is required', data: null };
+    }
+
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT id, contact_phone
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found', data: null };
+    }
+
+    await executeConversationsDb(
+      `UPDATE conversations
+       SET contact_name = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [trimmedContactName, conversationId, userId]
+    );
+
+    return {
+      success: true,
+      message: 'Conversation name updated',
+      data: {
+        conversationId: String(conversationId),
+        contactName: trimmedContactName,
+        displayName: getDisplayName(trimmedContactName, conversation.contact_phone),
+      },
+    };
+  } catch (error) {
+    log.error('updateConversationName error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to update conversation name', data: null };
+  }
+}
+
+// ========================================
 // CLEAR CONVERSATION
 // ========================================
 
@@ -2754,6 +2808,7 @@ export const conversationController = {
   togglePin: togglePinConversation,
   toggleMute: toggleMuteConversation,
   toggleBlock: toggleBlockConversation,
+  updateConversationName,
   toggleMessagePinned,
   toggleMessageStarred,
   clear: clearConversation,

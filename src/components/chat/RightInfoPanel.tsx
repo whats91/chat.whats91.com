@@ -1,17 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
 import { StarredMessagesDialog } from '@/components/chat/StarredMessagesDialog';
 import { useChatStore } from '@/stores/chatStore';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { toast } from '@/hooks/use-toast';
 import {
-  Phone,
-  Video,
   Star,
   Bell,
   BellOff,
@@ -22,6 +23,7 @@ import {
   ChevronDown,
   Tag,
   Image as ImageIcon,
+  PencilLine,
 } from 'lucide-react';
 import type { Conversation } from '@/lib/types/chat';
 
@@ -30,13 +32,22 @@ interface RightInfoPanelProps {
 }
 
 export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
-  const { conversations, labels, muteConversation, blockConversation } = useChatStore();
+  const { conversations, labels, muteConversation, blockConversation, updateConversationName } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
   const [isUpdatingBlock, setIsUpdatingBlock] = useState(false);
-  
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
+
+  useEffect(() => {
+    if (conversation && !isEditingName) {
+      setNameDraft(conversation.contactName || '');
+    }
+  }, [conversation, isEditingName]);
+
   if (!conversation) {
     return null;
   }
@@ -54,6 +65,37 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
     .join('')
     .toUpperCase()
     .slice(0, 2);
+
+  const handleSaveName = async () => {
+    const trimmedName = nameDraft.trim();
+
+    if (!trimmedName) {
+      toast({
+        title: 'Conversation name is required',
+        description: 'Enter a name before saving.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setIsSavingName(true);
+      await updateConversationName(conversation.id, trimmedName);
+      setIsEditingName(false);
+      toast({
+        title: 'Conversation updated',
+        description: 'The conversation name was saved successfully.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Unable to update conversation name',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingName(false);
+    }
+  };
   
   return (
     <div className="flex h-full min-h-0 w-80 flex-col overflow-hidden border-l border-border/80 bg-sidebar">
@@ -71,12 +113,52 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
           {participantEmail && (
             <p className="text-sm text-muted-foreground">{participantEmail}</p>
           )}
+          {isEditingName ? (
+            <form
+              className="mt-4 rounded-2xl border border-border/70 bg-accent/60 p-3 text-left dark:bg-accent/40"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSaveName();
+              }}
+            >
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                Conversation name
+              </label>
+              <Input
+                autoFocus
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                placeholder={participantPhone}
+                className="border-border/80 bg-background/85 text-foreground dark:text-white"
+              />
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setNameDraft(conversation.contactName || '');
+                    setIsEditingName(false);
+                  }}
+                  disabled={isSavingName}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={isSavingName}>
+                  {isSavingName ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </form>
+          ) : null}
         </div>
         
         {/* Quick Actions */}
-        <div className="flex justify-center gap-8 px-6 pb-6">
-          <ActionButton icon={Video} label="Video" />
-          <ActionButton icon={Phone} label="Call" />
+        <div className="flex justify-center gap-10 px-6 pb-6">
+          <ActionButton
+            icon={PencilLine}
+            label={isEditingName ? 'Close edit' : 'Edit'}
+            onClick={() => setIsEditingName((current) => !current)}
+          />
           <ActionButton icon={Search} label="Search" />
         </div>
         
@@ -250,6 +332,7 @@ function ActionButton({ icon: Icon, label, onClick }: ActionButtonProps) {
     <button
       className="flex flex-col items-center gap-1 text-primary"
       onClick={onClick}
+      type="button"
     >
       <div className="rounded-full bg-primary/10 p-3 transition-colors hover:bg-primary/20">
         <Icon className="h-5 w-5" />

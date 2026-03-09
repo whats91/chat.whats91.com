@@ -459,6 +459,16 @@ export interface StartConversationResponse {
   } | null;
 }
 
+export interface UpdateConversationResponse {
+  success: boolean;
+  message: string;
+  data: {
+    conversationId: string;
+    contactName: string | null;
+    displayName: string;
+  } | null;
+}
+
 // ========================================
 // WHATSAPP API TYPES
 // ========================================

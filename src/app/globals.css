@@ -92,19 +92,19 @@
 
 .dark {
   --background: #0b141a;
-  --foreground: #e9edef;
+  --foreground: #ffffff;
   --card: #111b21;
-  --card-foreground: #e9edef;
+  --card-foreground: #ffffff;
   --popover: #202c33;
-  --popover-foreground: #e9edef;
+  --popover-foreground: #ffffff;
   --primary: #00a884;
   --primary-foreground: #ffffff;
   --secondary: #202c33;
-  --secondary-foreground: #e9edef;
+  --secondary-foreground: #ffffff;
   --muted: #202c33;
   --muted-foreground: #8696a0;
   --accent: #2a3942;
-  --accent-foreground: #e9edef;
+  --accent-foreground: #ffffff;
   --destructive: oklch(0.704 0.191 22.216);
   --border: #313d45;
   --input: #202c33;
@@ -115,20 +115,20 @@
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
   --sidebar: #111b21;
-  --sidebar-foreground: #e9edef;
+  --sidebar-foreground: #ffffff;
   --sidebar-primary: #00a884;
   --sidebar-primary-foreground: #0b141a;
   --sidebar-accent: #202c33;
-  --sidebar-accent-foreground: #e9edef;
+  --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #313d45;
   --sidebar-ring: #00a884;
   --whatsapp-green: #005c4b;
   --whatsapp-light: #202c33;
   --whatsapp-dark: #005c4b;
   --bubble-in: #202c33;
-  --bubble-in-foreground: #e9edef;
+  --bubble-in-foreground: #ffffff;
   --bubble-out: #005c4b;
-  --bubble-out-foreground: #e9edef;
+  --bubble-out-foreground: #ffffff;
   --bubble-out-muted: #9bb0ba;
   --bubble-in-muted: #8696a0;
 }
