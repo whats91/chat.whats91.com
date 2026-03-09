@@ -19,13 +19,17 @@ import { getCurrentUserId } from '@/lib/config/current-user';
 import { usePubSub } from '@/hooks/use-pubsub';
 import { debugPubSub } from '@/lib/pubsub/debug';
 import { getNotificationPreferences } from '@/lib/notifications/preferences';
+import { collectNotificationEnvironmentSnapshot, debugNotification } from '@/lib/notifications/debug';
 import {
   getPermissionState as getNotificationPermissionState,
+  isSecureNotificationContext,
   showMessageNotification,
+  showPermissionGrantedNotification,
   showStatusNotification,
 } from '@/lib/notifications/service';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useNotifications } from '@/hooks/use-notifications';
 import { useServiceWorker } from '@/hooks/use-service-worker';
 
 // Keyboard shortcuts mapping (WhatsApp Web style)
@@ -255,6 +259,13 @@ export function AppShell() {
   const currentUserId = getCurrentUserId();
   const pendingIncomingTimersRef = useRef(new Map<string, number>());
   const pendingTypingCountsRef = useRef(new Map<string, number>());
+  const autoPermissionAttemptedRef = useRef(false);
+  const interactionRetryBoundRef = useRef(false);
+  const {
+    supported: notificationsSupported,
+    permission: notificationPermission,
+    requestPermission: requestNotificationPermission,
+  } = useNotifications();
 
   useServiceWorker({ registerOnMount: true });
 
@@ -319,6 +330,14 @@ export function AppShell() {
         return;
       }
 
+      debugNotification('Showing incoming message notification', {
+        conversationId: message.conversationId,
+        messageId: message.id,
+        messageType: message.type,
+        contactName,
+        contactPhone,
+      });
+
       await showMessageNotification({
         conversationId: Number(message.conversationId),
         contactName,
@@ -350,6 +369,12 @@ export function AppShell() {
       if (!conversation || conversation.isMuted) {
         return;
       }
+
+      debugNotification('Showing status notification', {
+        conversationId: conversationKey,
+        messageId,
+        status,
+      });
 
       await showStatusNotification({
         messageId,
@@ -611,6 +636,98 @@ export function AppShell() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const logEnvironment = async () => {
+      const snapshot = await collectNotificationEnvironmentSnapshot();
+      if (!cancelled) {
+        debugNotification('AppShell notification environment snapshot', snapshot);
+        if (snapshot.pushManagerSupported && !snapshot.pushSubscription) {
+          debugNotification('No PushManager subscription is registered for this app instance', {
+            displayMode: snapshot.displayMode,
+            serviceWorkerScope: snapshot.serviceWorkerScope,
+          });
+        }
+      }
+    };
+
+    void logEnvironment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!notificationsSupported) {
+      debugNotification('Automatic permission request skipped because notifications are unsupported');
+      return;
+    }
+
+    if (!isSecureNotificationContext()) {
+      debugNotification('Automatic permission request skipped because the page is not running in a secure context');
+      return;
+    }
+
+    if (!notificationPermission.default || autoPermissionAttemptedRef.current) {
+      return;
+    }
+
+    autoPermissionAttemptedRef.current = true;
+    debugNotification('Attempting automatic notification permission request on chat shell load', {
+      permission: notificationPermission,
+    });
+
+    const timeoutId = window.setTimeout(async () => {
+      const granted = await requestNotificationPermission();
+      debugNotification('Automatic notification permission request completed', {
+        granted,
+        permission: getNotificationPermissionState(),
+      });
+
+      if (granted) {
+        await showPermissionGrantedNotification();
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [notificationPermission, notificationsSupported, requestNotificationPermission]);
+
+  useEffect(() => {
+    if (!notificationsSupported || !notificationPermission.default || interactionRetryBoundRef.current) {
+      return;
+    }
+
+    const retryPermissionRequest = async () => {
+      debugNotification('Retrying notification permission request from first user interaction');
+      interactionRetryBoundRef.current = true;
+
+      window.removeEventListener('pointerdown', retryPermissionRequest);
+      window.removeEventListener('keydown', retryPermissionRequest);
+
+      const granted = await requestNotificationPermission();
+      debugNotification('Interaction-based notification permission request completed', {
+        granted,
+        permission: getNotificationPermissionState(),
+      });
+
+      if (granted) {
+        await showPermissionGrantedNotification();
+      }
+    };
+
+    window.addEventListener('pointerdown', retryPermissionRequest, { once: true });
+    window.addEventListener('keydown', retryPermissionRequest, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', retryPermissionRequest);
+      window.removeEventListener('keydown', retryPermissionRequest);
+    };
+  }, [notificationPermission, notificationsSupported, requestNotificationPermission]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

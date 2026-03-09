@@ -132,7 +132,7 @@ self.addEventListener('notificationclick', (event) => {
 
 // Message handling
 self.addEventListener('message', (event) => {
-  if (event.data === 'skipWaiting') {
+  if (event.data === 'skipWaiting' || event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
