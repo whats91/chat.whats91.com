@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { ConversationLabelsDialog } from '@/components/chat/ConversationLabelsDialog';
 import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
@@ -27,6 +27,7 @@ import {
   Tag,
   Image as ImageIcon,
   PencilLine,
+  Upload,
 } from 'lucide-react';
 
 interface RightInfoPanelProps {
@@ -34,8 +35,16 @@ interface RightInfoPanelProps {
 }
 
 export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
-  const { conversations, muteConversation, blockConversation, updateConversationName, updateConversationNotes } = useChatStore();
+  const {
+    conversations,
+    muteConversation,
+    blockConversation,
+    updateConversationName,
+    updateConversationNotes,
+    updateConversationProfileImage,
+  } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
+  const profileImageInputRef = useRef<HTMLInputElement | null>(null);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
@@ -47,6 +56,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   const [notesDraft, setNotesDraft] = useState('');
   const [isNotesDirty, setIsNotesDirty] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [isUploadingProfileImage, setIsUploadingProfileImage] = useState(false);
 
   useEffect(() => {
     if (conversation && !isEditingName) {
@@ -78,7 +88,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
     ? rawParticipantName
     : participantPhone;
-  const participantAvatar = participant?.avatar;
+  const participantAvatar = conversation.profileImageUrl || participant?.avatar;
   const participantEmail = participant?.email;
   
   const initials = participantName
@@ -140,23 +150,94 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
       setIsSavingNotes(false);
     }
   };
+
+  const handleProfileImageSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Unsupported file',
+        description: 'Please choose an image file for the profile photo.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setIsUploadingProfileImage(true);
+      await updateConversationProfileImage(conversation.id, file);
+      toast({
+        title: 'Profile photo updated',
+        description: 'The conversation profile image was uploaded successfully.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Unable to update profile photo',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploadingProfileImage(false);
+    }
+  };
   
   return (
     <div className="flex h-full min-h-0 w-80 flex-col overflow-hidden border-l border-border/80 bg-sidebar">
       <ScrollArea className="min-h-0 flex-1">
         {/* Header */}
         <div className="p-6 text-center">
-          <Avatar className="h-24 w-24 mx-auto mb-4">
-            <AvatarImage src={participantAvatar} alt={participantName} />
-            <AvatarFallback className="bg-primary/20 text-primary text-2xl font-medium">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
+          <input
+            ref={profileImageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleProfileImageSelection}
+          />
+          <button
+            type="button"
+            className="group mx-auto mb-4 block"
+            onClick={() => profileImageInputRef.current?.click()}
+            disabled={isUploadingProfileImage}
+          >
+            <div className="relative">
+              <Avatar className="h-24 w-24">
+                <AvatarImage src={participantAvatar || undefined} alt={participantName} />
+                <AvatarFallback className="bg-primary/20 text-primary text-2xl font-medium">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="absolute inset-0 flex items-end justify-center rounded-full bg-black/0 transition-colors group-hover:bg-black/35">
+                <span className="mb-2 inline-flex items-center gap-1 rounded-full bg-background/85 px-2 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 dark:bg-background/70 dark:text-white">
+                  {isUploadingProfileImage ? (
+                    'Uploading...'
+                  ) : (
+                    <>
+                      <Upload className="h-3 w-3" />
+                      Upload
+                    </>
+                  )}
+                </span>
+              </div>
+            </div>
+          </button>
           <h2 className="text-lg font-semibold">{participantName}</h2>
           <p className="text-sm text-muted-foreground">{participantPhone}</p>
           {participantEmail && (
             <p className="text-sm text-muted-foreground">{participantEmail}</p>
           )}
+          <button
+            type="button"
+            className="mt-2 text-xs text-muted-foreground transition-colors hover:text-foreground dark:hover:text-white"
+            onClick={() => profileImageInputRef.current?.click()}
+            disabled={isUploadingProfileImage}
+          >
+            {isUploadingProfileImage ? 'Uploading profile photo...' : 'Click profile photo to upload'}
+          </button>
           {isEditingName ? (
             <form
               className="mt-4 rounded-2xl border border-border/70 bg-accent/60 p-3 text-left dark:bg-accent/40"

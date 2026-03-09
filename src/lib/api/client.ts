@@ -19,6 +19,7 @@ import type {
   StartConversationResponse,
   UpdateConversationResponse,
   UpdateConversationNotesResponse,
+  UpdateConversationProfileImageResponse,
 } from '@/lib/types/chat';
 
 const API_BASE = '/api';
@@ -328,6 +329,21 @@ export async function updateConversationNotes(
   return response.json();
 }
 
+export async function uploadConversationProfileImage(
+  conversationId: string | number,
+  file: File
+): Promise<UpdateConversationProfileImageResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/profile-image`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  return response.json();
+}
+
 export async function toggleMessagePinned(
   conversationId: string | number,
   messageId: string | number
@@ -478,6 +494,7 @@ export const api = {
     togglePin,
     updateConversationName,
     updateConversationNotes,
+    uploadConversationProfileImage,
     fetchConversationLabels,
     fetchChatLabels,
     updateConversationLabels,

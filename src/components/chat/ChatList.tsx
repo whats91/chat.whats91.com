@@ -246,8 +246,8 @@ export function ChatList({ className }: ChatListProps) {
       }),
     [conversations]
   );
-  const visibleLabels = useMemo(() => availableLabels.slice(0, 2), [availableLabels]);
-  const overflowLabels = useMemo(() => availableLabels.slice(2), [availableLabels]);
+  const visibleLabels = useMemo(() => availableLabels.slice(0, 1), [availableLabels]);
+  const overflowLabels = useMemo(() => availableLabels.slice(1), [availableLabels]);
   const hasActiveOverflowLabel = useMemo(
     () => overflowLabels.some((label) => label.id === selectedLabelId),
     [overflowLabels, selectedLabelId]

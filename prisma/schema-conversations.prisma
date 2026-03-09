@@ -29,6 +29,7 @@ model Conversation {
   contactId             BigInt?   @map("contact_id")
   contactName           String?   @map("contact_name")
   conversationNotes     String?   @map("conversation_notes") @db.Text
+  profileImageWasabiPath String?  @map("profile_image_wasabi_path") @db.VarChar(512)
   whatsappPhoneNumberId String    @map("whatsapp_phone_number_id")
   phoneNumber           String?   @map("phone_number") @db.VarChar(25)
   

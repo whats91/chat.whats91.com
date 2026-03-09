@@ -44,6 +44,12 @@ import {
   resolvePendingConversationMediaUpload,
   uploadConversationMedia,
 } from '@/server/media/conversation-media-service';
+import {
+  deleteWasabiObject,
+  generateWasabiPath,
+  streamWasabiObject,
+  uploadBufferToWasabi,
+} from '@/server/storage/wasabi-storage';
 import { Logger } from '@/lib/logger';
 import { prepareVoiceNoteAudio, type VoiceNoteRecordingMode } from '@/server/media/voice-note-audio';
 import { buildExcelWorkbookBuffer } from '@/server/export/chat-excel';
@@ -91,6 +97,17 @@ function formatTimeAgo(date: Date | null): string {
 function getDisplayName(contactName: string | null, contactPhone: string): string {
   if (contactName) return contactName;
   return `+${contactPhone}`;
+}
+
+function buildConversationProfileImageUrl(
+  conversationId: string | number,
+  wasabiPath: string | null | undefined
+): string | null {
+  if (!wasabiPath) {
+    return null;
+  }
+
+  return `/api/conversations/${String(conversationId)}/profile-image`;
 }
 
 /**
@@ -745,7 +762,7 @@ export async function getConversations({
     // Build the SQL query
     let sql = `
       SELECT 
-        c.id, c.contact_phone, c.contact_name, c.whatsapp_phone_number_id,
+        c.id, c.contact_phone, c.contact_name, c.profile_image_wasabi_path, c.whatsapp_phone_number_id,
         c.last_message_id, c.last_message_content, c.last_message_type,
         c.last_message_at, c.last_message_direction, c.unread_count,
         c.total_messages, c.is_archived, c.is_pinned, c.is_muted, c.is_blocked, c.status,
@@ -846,6 +863,7 @@ export async function getConversations({
       id: conv.id,
       contactPhone: conv.contact_phone,
       contactName: conv.contact_name,
+      profileImageUrl: buildConversationProfileImageUrl(conv.id, conv.profile_image_wasabi_path),
       displayName: getDisplayName(conv.contact_name, conv.contact_phone),
       lastMessageContent: conv.last_message_content 
         ? getPreviewText(conv.last_message_type, conv.last_message_content)
@@ -1273,6 +1291,7 @@ export async function getConversationById({
           contactPhone: conversation.contact_phone,
           contactName: conversation.contact_name,
           conversationNotes: conversation.conversation_notes || null,
+          profileImageUrl: buildConversationProfileImageUrl(conversation.id, conversation.profile_image_wasabi_path),
           isBlocked: Boolean(conversation.is_blocked),
           isServiceWindowOpen: serviceWindow.isOpen,
           serviceWindowStartedAt: serviceWindow.lastInboundMessageAt,
@@ -2252,6 +2271,146 @@ export async function updateConversationNotes(
   }
 }
 
+export async function uploadConversationProfileImage(params: {
+  conversationId: number;
+  userId: string;
+  fileBuffer: Buffer;
+  mimeType: string | null | undefined;
+  originalFilename: string;
+  fileSize: number;
+}) {
+  const {
+    conversationId,
+    userId,
+    fileBuffer,
+    mimeType,
+    originalFilename,
+    fileSize,
+  } = params;
+
+  try {
+    if (!mimeType || !mimeType.startsWith('image/')) {
+      return { success: false, message: 'Only image files can be used as profile photos', data: null, status: 400 };
+    }
+
+    if (fileSize <= 0) {
+      return { success: false, message: 'Uploaded file is empty', data: null, status: 400 };
+    }
+
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT id, profile_image_wasabi_path
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found', data: null, status: 404 };
+    }
+
+    const wasabiPath = generateWasabiPath(
+      userId,
+      conversationId,
+      'profile-image',
+      originalFilename || 'profile-image'
+    );
+
+    const uploadResult = await uploadBufferToWasabi(fileBuffer, wasabiPath, mimeType);
+    if (!uploadResult.success) {
+      return { success: false, message: uploadResult.error, data: null, status: 500 };
+    }
+
+    await executeConversationsDb(
+      `UPDATE conversations
+       SET profile_image_wasabi_path = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [wasabiPath, conversationId, userId]
+    );
+
+    const previousWasabiPath =
+      typeof conversation.profile_image_wasabi_path === 'string'
+        ? conversation.profile_image_wasabi_path
+        : null;
+
+    if (previousWasabiPath && previousWasabiPath !== wasabiPath) {
+      const deleteResult = await deleteWasabiObject(previousWasabiPath);
+      if (!deleteResult.success) {
+        log.warn('Failed to delete previous conversation profile image from Wasabi', {
+          conversationId,
+          userId,
+          previousWasabiPath,
+          error: deleteResult.error,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Conversation profile image updated',
+      data: {
+        conversationId: String(conversationId),
+        profileImageUrl: buildConversationProfileImageUrl(conversationId, wasabiPath),
+      },
+      status: 200,
+    };
+  } catch (error) {
+    log.error('uploadConversationProfileImage error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to update conversation profile image', data: null, status: 500 };
+  }
+}
+
+export async function streamConversationProfileImage(params: {
+  conversationId: number;
+  userId: string;
+}) {
+  const { conversationId, userId } = params;
+
+  try {
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT profile_image_wasabi_path
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    const wasabiPath =
+      typeof conversation?.profile_image_wasabi_path === 'string'
+        ? conversation.profile_image_wasabi_path
+        : null;
+
+    if (!wasabiPath) {
+      return { success: false, message: 'Conversation profile image not found', status: 404 };
+    }
+
+    const streamResult = await streamWasabiObject(wasabiPath);
+    if (!streamResult.success) {
+      return { success: false, message: streamResult.error, status: 500 };
+    }
+
+    return {
+      success: true,
+      message: 'Conversation profile image streamed successfully',
+      stream: streamResult.body,
+      mimeType: streamResult.contentType || 'application/octet-stream',
+      contentLength: streamResult.contentLength,
+      status: 200,
+    };
+  } catch (error) {
+    log.error('streamConversationProfileImage error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to load conversation profile image', status: 500 };
+  }
+}
+
 // ========================================
 // CONVERSATION LABELS
 // ========================================
@@ -3120,6 +3279,8 @@ export const conversationController = {
   toggleBlock: toggleBlockConversation,
   updateConversationName,
   updateConversationNotes,
+  uploadConversationProfileImage,
+  streamConversationProfileImage,
   getConversationLabels,
   updateConversationLabels,
   toggleMessagePinned,

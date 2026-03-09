@@ -23,6 +23,7 @@ import {
   updateConversationLabels as apiUpdateConversationLabels,
   updateConversationName as apiUpdateConversationName,
   updateConversationNotes as apiUpdateConversationNotes,
+  uploadConversationProfileImage as apiUploadConversationProfileImage,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { debugPubSub } from '@/lib/pubsub/debug';
@@ -276,6 +277,7 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
     contactPhone: conv.contactPhone,
     contactName: conv.contactName,
     conversationNotes: null,
+    profileImageUrl: conv.profileImageUrl,
     labels: conv.labels || [],
     whatsappPhoneNumberId: '',
     isServiceWindowOpen: true,
@@ -291,7 +293,7 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
       name: conv.displayName,
       phone: conv.contactPhone,
       status: 'offline',
-      avatar: undefined,
+      avatar: conv.profileImageUrl || undefined,
     },
     lastMessage: conv.lastMessageContent
       ? {
@@ -386,6 +388,7 @@ interface ChatState {
   blockConversation: (id: string) => Promise<void>;
   updateConversationName: (id: string, contactName: string) => Promise<void>;
   updateConversationNotes: (id: string, conversationNotes: string) => Promise<void>;
+  updateConversationProfileImage: (id: string, file: File) => Promise<void>;
   updateConversationLabels: (id: string, labels: string[]) => Promise<void>;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -598,6 +601,7 @@ export const useChatStore = create<ChatState>()(
                         ...conversation,
                         contactName: response.data.conversation.contactName,
                         conversationNotes: response.data.conversation.conversationNotes,
+                        profileImageUrl: response.data.conversation.profileImageUrl,
                         labels: response.data.conversation.labels || [],
                         isBlocked: response.data.conversation.isBlocked,
                         isServiceWindowOpen: response.data.conversation.isServiceWindowOpen,
@@ -612,13 +616,14 @@ export const useChatStore = create<ChatState>()(
                           ? {
                               ...conversation.participant,
                               name: response.data.conversation.displayName,
+                              avatar: response.data.conversation.profileImageUrl || conversation.participant.avatar,
                             }
                           : {
                               id: conversation.id,
                               name: response.data.conversation.displayName,
                               phone: response.data.conversation.contactPhone,
                               status: 'offline',
-                              avatar: undefined,
+                              avatar: response.data.conversation.profileImageUrl || undefined,
                             },
                       }
                     : conversation
@@ -1002,6 +1007,43 @@ export const useChatStore = create<ChatState>()(
         } catch (error) {
           set({
             conversationsError: error instanceof Error ? error.message : 'Failed to update conversation notes',
+          });
+          throw error;
+        }
+      },
+
+      updateConversationProfileImage: async (id, file) => {
+        try {
+          const response = await apiUploadConversationProfileImage(id, file);
+          if (!response.success || !response.data) {
+            throw new Error(response.message || 'Failed to update conversation profile image');
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((conversation) =>
+              conversation.id === id
+                ? {
+                    ...conversation,
+                    profileImageUrl: response.data?.profileImageUrl ?? null,
+                    participant: conversation.participant
+                      ? {
+                          ...conversation.participant,
+                          avatar: response.data?.profileImageUrl || undefined,
+                        }
+                      : {
+                          id: conversation.id,
+                          name: conversation.contactName || conversation.contactPhone,
+                          phone: conversation.contactPhone,
+                          status: 'offline',
+                          avatar: response.data?.profileImageUrl || undefined,
+                        },
+                  }
+                : conversation
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update conversation profile image',
           });
           throw error;
         }
