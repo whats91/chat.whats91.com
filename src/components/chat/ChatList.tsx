@@ -62,7 +62,9 @@ export function ChatList({ className }: ChatListProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all');
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [availableLabels, setAvailableLabels] = useState<ChatLabel[]>([]);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const deferredSearchQuery = useDeferredValue(searchQuery);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollAreaContainerRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
   const [dangerDialogState, setDangerDialogState] = useState<{
@@ -162,6 +164,31 @@ export function ChatList({ className }: ChatListProps) {
   }, []);
 
   useEffect(() => {
+    if (!isSearchOpen) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const input = searchContainerRef.current?.querySelector('input');
+      if (input instanceof HTMLInputElement) {
+        input.focus();
+        input.select();
+      }
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isSearchOpen]);
+
+  function handleResetToAll() {
+    setFilter('all');
+    setSelectedLabelId(null);
+    setSearchQuery('');
+    setIsSearchOpen(false);
+  }
+
+  useEffect(() => {
     void loadConversations({
       page: 1,
       search: deferredSearchQuery.trim(),
@@ -230,12 +257,30 @@ export function ChatList({ className }: ChatListProps) {
     <div className={cn('flex h-full flex-col bg-sidebar', className)}>
       {/* Header */}
       <div className="border-b border-border/80 p-3">
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <img src="/images/icon.png" alt="Whats91" className="h-7 w-7 rounded-sm" />
             <h1 className="text-xl font-semibold">Chats</h1>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => {
+                setIsSearchOpen((current) => {
+                  const next = !current;
+
+                  if (!next) {
+                    setSearchQuery('');
+                  }
+
+                  return next;
+                });
+              }}
+            >
+              <Search className="h-5 w-5" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -283,35 +328,41 @@ export function ChatList({ className }: ChatListProps) {
         </div>
         
         {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search or start new chat"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="rounded-full border-border/70 bg-card pl-9 shadow-none"
-          />
+        <div
+          className={cn(
+            'grid transition-all duration-200 ease-out',
+            isSearchOpen ? 'mb-3 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+          )}
+        >
+          <div className="overflow-hidden">
+            <div ref={searchContainerRef} className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search or start new chat"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="rounded-full border-border/70 bg-card pl-9 shadow-none"
+              />
+            </div>
+          </div>
         </div>
         
         {/* Filter Tabs */}
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex w-full items-center gap-1 rounded-2xl bg-muted/50 p-1">
           <Button
             variant={filter === 'all' && !selectedLabelId ? 'secondary' : 'ghost'}
             size="sm"
-            className="h-7 shrink-0 text-xs"
-            onClick={() => {
-              setFilter('all');
-              setSelectedLabelId(null);
-            }}
+            className="h-8 shrink-0 rounded-xl px-4 text-xs"
+            onClick={handleResetToAll}
           >
             All
           </Button>
-          <div className="min-w-0 flex-1 overflow-x-auto pb-1">
-            <div className="flex w-max items-center gap-2 pr-1">
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-1 pr-1">
               <Button
                 variant={filter === 'unread' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-7 text-xs"
+                className="h-8 rounded-xl text-xs"
                 onClick={() => {
                   setFilter('unread');
                   setSelectedLabelId(null);
@@ -322,7 +373,7 @@ export function ChatList({ className }: ChatListProps) {
               <Button
                 variant={filter === 'archived' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-7 text-xs"
+                className="h-8 rounded-xl text-xs"
                 onClick={() => {
                   setFilter('archived');
                   setSelectedLabelId(null);
@@ -338,7 +389,7 @@ export function ChatList({ className }: ChatListProps) {
                     key={label.id}
                     variant={isActive ? 'secondary' : 'ghost'}
                     size="sm"
-                    className="h-7 gap-1.5 text-xs"
+                    className="h-8 rounded-xl gap-1.5 text-xs"
                     onClick={() => {
                       setFilter('all');
                       setSelectedLabelId((current) => (current === label.id ? null : label.id));
