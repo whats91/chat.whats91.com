@@ -17,7 +17,7 @@ import { NewChatModal } from '@/components/chat/NewChatModal';
 import { VersionFooter } from '@/components/common/VersionFooter';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { usePubSub } from '@/hooks/use-pubsub';
-import { debugPubSub } from '@/lib/pubsub/debug';
+import { debugPubSub, logPubSubPayload } from '@/lib/pubsub/debug';
 import { getNotificationPreferences } from '@/lib/notifications/preferences';
 import { collectNotificationEnvironmentSnapshot, debugNotification } from '@/lib/notifications/debug';
 import {
@@ -483,10 +483,7 @@ export function AppShell() {
 
   const handlePubSubPayload = useCallback(
     (payload: PubSubClientPayload) => {
-      debugPubSub('AppShell received payload', {
-        payloadType: payload.type,
-        payload,
-      });
+      logPubSubPayload(payload);
 
       if (payload.type === 'new_message') {
         const event = payload as PubSubNewMessageEvent;

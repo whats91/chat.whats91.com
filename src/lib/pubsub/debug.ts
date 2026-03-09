@@ -2,6 +2,29 @@
 
 const DEBUG_STORAGE_KEY = 'whats91.debug.pubsub';
 
+function stringifyPubSubPayload(payload: unknown): string {
+  const seen = new WeakSet<object>();
+
+  return JSON.stringify(
+    payload,
+    (_key, value) => {
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+
+      return value;
+    },
+    2
+  );
+}
+
 export function isPubSubDebugEnabled(): boolean {
   if (typeof window === 'undefined') {
     return false;
@@ -19,17 +42,23 @@ export function isPubSubDebugEnabled(): boolean {
   return true;
 }
 
-export function debugPubSub(message: string, meta?: Record<string, unknown>): void {
+export function debugPubSub(_message: string, _meta?: Record<string, unknown>): void {
+  // Frontend pub/sub debugging is intentionally reduced to a single payload log.
+}
+
+export function logPubSubPayload(payload: unknown): void {
   if (!isPubSubDebugEnabled()) {
     return;
   }
 
-  if (meta) {
-    console.log(`[PubSubDebug] ${message}`, meta);
-    return;
+  try {
+    console.log('[PubSubDebug] Incoming payload', stringifyPubSubPayload(payload));
+  } catch (error) {
+    console.log('[PubSubDebug] Incoming payload', {
+      serializationError: error instanceof Error ? error.message : String(error),
+      payload,
+    });
   }
-
-  console.log(`[PubSubDebug] ${message}`);
 }
 
 export function enablePubSubDebug(): void {
