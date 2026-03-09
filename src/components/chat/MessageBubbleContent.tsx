@@ -66,7 +66,7 @@ function escapeHtml(text: string): string {
 
 function formatWhatsAppText(text: string): string {
   let safeText = escapeHtml(text);
-  safeText = safeText.replace(/```([\s\S]+?)```/g, '<code class="rounded bg-black/10 px-1 py-0.5">$1</code>');
+  safeText = safeText.replace(/```([\s\S]+?)```/g, '<code class="rounded bg-black/8 px-1 py-0.5 dark:bg-white/10">$1</code>');
   safeText = safeText.replace(/\*([^*]+)\*/g, '<strong>$1</strong>');
   safeText = safeText.replace(/_([^_]+)_/g, '<em>$1</em>');
   safeText = safeText.replace(/~([^~]+)~/g, '<del>$1</del>');
@@ -79,12 +79,14 @@ const STICKER_MEDIA_CARD_CLASS = 'w-[min(14rem,calc(100vw-9rem))] max-w-full';
 function getPanelClass(isOwn: boolean): string {
   return cn(
     'rounded-md border p-3',
-    isOwn ? 'border-primary-foreground/15 bg-primary-foreground/10' : 'border-border/70 bg-background/70'
+    isOwn
+      ? 'border-black/8 bg-black/6 dark:border-white/8 dark:bg-white/6'
+      : 'border-border/70 bg-background/85'
   );
 }
 
 function getMutedTextClass(isOwn: boolean): string {
-  return isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground';
+  return isOwn ? 'text-[var(--bubble-out-muted)]' : 'text-[var(--bubble-in-muted)]';
 }
 
 function getMessageCaption(content: string, caption: string | null): string | null {
@@ -180,7 +182,7 @@ function AttachmentFallback({
   return (
     <div className={cn(getPanelClass(isOwn), className)}>
       <div className="flex items-start gap-3">
-        <div className="rounded-md bg-black/10 p-2">
+        <div className="rounded-md bg-black/8 p-2 dark:bg-white/10">
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0">
@@ -226,7 +228,7 @@ function ImageContent({
       {onOpenMedia ? (
         <button
           type="button"
-          className="block w-full overflow-hidden rounded-md bg-black/10"
+          className="block w-full overflow-hidden rounded-md bg-black/8 dark:bg-white/10"
           onClick={() => onOpenMedia(message)}
         >
           <AspectRatio ratio={sticker ? 1 : 4 / 3}>
@@ -242,7 +244,7 @@ function ImageContent({
           </AspectRatio>
         </button>
       ) : (
-        <div className="overflow-hidden rounded-md bg-black/10">
+        <div className="overflow-hidden rounded-md bg-black/8 dark:bg-white/10">
           <AspectRatio ratio={sticker ? 1 : 4 / 3}>
             <img
               src={mediaUrl}
@@ -407,7 +409,7 @@ function DocumentOpenButton({
       className={cn(
         'inline-flex items-center gap-1 text-xs font-medium transition-opacity',
         isOpening && 'cursor-wait opacity-70',
-        isOwn ? 'text-primary-foreground/90' : 'text-primary'
+        isOwn ? 'text-[var(--bubble-out-foreground)]/90' : 'text-primary'
       )}
     >
       <ExternalLink className="h-3 w-3" />
@@ -436,7 +438,7 @@ function DocumentContent({
     <div className="space-y-2">
       <div className={cn(getPanelClass(isOwn), STANDARD_MEDIA_CARD_CLASS)}>
         <div className="flex items-start gap-3">
-          <div className="rounded-md bg-black/10 p-2">
+          <div className="rounded-md bg-black/8 p-2 dark:bg-white/10">
             <FileText className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
@@ -470,7 +472,7 @@ function LocationContent({
   return (
     <a href={mapUrl} target="_blank" rel="noopener noreferrer" className="block">
       <div className={getPanelClass(isOwn)}>
-        <div className="mb-3 flex h-24 items-center justify-center rounded-md bg-black/10">
+        <div className="mb-3 flex h-24 items-center justify-center rounded-md bg-black/8 dark:bg-white/10">
           <MapPin className="h-7 w-7" />
         </div>
         <div className="space-y-1">
@@ -511,7 +513,7 @@ function ContactContent({
         return (
           <div key={`${displayName}-${index}`} className={getPanelClass(isOwn)}>
             <div className="flex items-start gap-3">
-              <div className="rounded-full bg-black/10 p-2.5">
+              <div className="rounded-full bg-black/8 p-2.5 dark:bg-white/10">
                 <UserRound className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
@@ -584,7 +586,7 @@ function InteractiveListContent({
             {section.title && <p className={cn('text-[11px] font-semibold uppercase tracking-wide', getMutedTextClass(isOwn))}>{section.title}</p>}
             <div className="space-y-2">
               {section.rows.map((row) => (
-                <div key={row.id} className="rounded-md bg-black/5 px-3 py-2">
+                <div key={row.id} className="rounded-md bg-black/5 px-3 py-2 dark:bg-white/8">
                   <p className="text-sm font-medium break-words">{row.title}</p>
                   {row.description && (
                     <p className={cn('mt-1 text-xs break-words', getMutedTextClass(isOwn))}>{row.description}</p>
@@ -610,7 +612,9 @@ function ReactionContent({
     <div
       className={cn(
         'inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-sm',
-        isOwn ? 'border-primary-foreground/15 bg-primary-foreground/10' : 'border-border/70 bg-background/70'
+        isOwn
+          ? 'border-black/8 bg-black/6 dark:border-white/8 dark:bg-white/6'
+          : 'border-border/70 bg-background/85'
       )}
     >
       <SmilePlus className="h-4 w-4 opacity-70" />

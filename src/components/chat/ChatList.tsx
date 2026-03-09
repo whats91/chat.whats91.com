@@ -194,9 +194,9 @@ export function ChatList({ className }: ChatListProps) {
   );
   
   return (
-    <div className={cn('flex flex-col h-full bg-background', className)}>
+    <div className={cn('flex h-full flex-col bg-sidebar', className)}>
       {/* Header */}
-      <div className="p-3 border-b">
+      <div className="border-b border-border/80 p-3">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <img src="/images/icon.png" alt="Whats91" className="h-7 w-7 rounded-sm" />
@@ -256,7 +256,7 @@ export function ChatList({ className }: ChatListProps) {
             placeholder="Search or start new chat"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 bg-muted/50"
+            className="rounded-full border-border/70 bg-card pl-9 shadow-none"
           />
         </div>
         
@@ -298,7 +298,7 @@ export function ChatList({ className }: ChatListProps) {
             <p className="text-sm">No chats found</p>
           </div>
         ) : (
-          <div className="divide-y">
+          <div className="divide-y divide-border/70">
             {searchFiltered.map((conversation) => (
               <ChatListItem
                 key={conversation.id}
@@ -400,8 +400,8 @@ function ChatListItem({
   return (
     <div
       className={cn(
-        'flex items-center gap-3 p-3 cursor-pointer transition-colors hover:bg-muted/50',
-        isSelected && 'bg-primary/10'
+        'group flex cursor-pointer items-center gap-3 p-3 transition-colors hover:bg-accent/80',
+        isSelected && 'bg-accent'
       )}
       onClick={onSelect}
     >

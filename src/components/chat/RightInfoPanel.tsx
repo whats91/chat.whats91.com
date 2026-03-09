@@ -56,7 +56,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
     .slice(0, 2);
   
   return (
-    <div className="flex h-full min-h-0 w-80 flex-col overflow-hidden border-l bg-background">
+    <div className="flex h-full min-h-0 w-80 flex-col overflow-hidden border-l border-border/80 bg-sidebar">
       <ScrollArea className="min-h-0 flex-1">
         {/* Header */}
         <div className="p-6 text-center">
@@ -137,7 +137,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         
         {/* Starred Messages */}
         <button
-          className="flex items-center gap-3 p-4 w-full text-left hover:bg-muted/50"
+          className="flex w-full items-center gap-3 p-4 text-left hover:bg-accent/80"
           onClick={() => setIsStarredDialogOpen(true)}
         >
           <Star className="h-5 w-5 text-muted-foreground" />
@@ -148,7 +148,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         
         {/* Mute / Notifications */}
         <button
-          className="flex items-center gap-3 p-4 w-full text-left hover:bg-muted/50"
+          className="flex w-full items-center gap-3 p-4 text-left hover:bg-accent/80"
           onClick={() => {
             void muteConversation(conversation.id);
           }}
@@ -175,7 +175,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         {/* Danger Zone */}
         <div className="p-4 space-y-3">
           <button
-            className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2 disabled:cursor-wait disabled:opacity-70"
+            className="mx-[-0.5rem] flex w-full items-center gap-3 rounded-lg p-2 text-left text-destructive hover:bg-destructive/10 disabled:cursor-wait disabled:opacity-70"
             disabled={isUpdatingBlock}
             onClick={() => {
               setIsUpdatingBlock(true);
@@ -194,14 +194,14 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
             </span>
           </button>
           <button
-            className="flex items-center gap-3 w-full text-left hover:bg-muted/50 rounded-lg p-2 -mx-2"
+            className="mx-[-0.5rem] flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-accent/80"
             onClick={() => setDangerAction('clear')}
           >
             <Eraser className="h-5 w-5" />
             <span className="text-sm">Clear chat</span>
           </button>
           <button
-            className="flex items-center gap-3 w-full text-left text-destructive hover:bg-destructive/10 rounded-lg p-2 -mx-2"
+            className="mx-[-0.5rem] flex w-full items-center gap-3 rounded-lg p-2 text-left text-destructive hover:bg-destructive/10"
             onClick={() => setDangerAction('delete')}
           >
             <Trash2 className="h-5 w-5" />
@@ -251,7 +251,7 @@ function ActionButton({ icon: Icon, label, onClick }: ActionButtonProps) {
       className="flex flex-col items-center gap-1 text-primary"
       onClick={onClick}
     >
-      <div className="p-3 rounded-full bg-primary/10 hover:bg-primary/20 transition-colors">
+      <div className="rounded-full bg-primary/10 p-3 transition-colors hover:bg-primary/20">
         <Icon className="h-5 w-5" />
       </div>
       <span className="text-xs">{label}</span>
@@ -267,7 +267,7 @@ interface QuickLinkProps {
 
 function QuickLink({ icon: Icon, label, count }: QuickLinkProps) {
   return (
-    <button className="flex items-center justify-between w-full text-left hover:bg-muted/50 rounded-lg p-2 -mx-2">
+    <button className="mx-[-0.5rem] flex w-full items-center justify-between rounded-lg p-2 text-left hover:bg-accent/80">
       <div className="flex items-center gap-3">
         <Icon className="h-5 w-5 text-muted-foreground" />
         <span className="text-sm">{label}</span>

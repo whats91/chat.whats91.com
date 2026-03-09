@@ -468,7 +468,7 @@ export function ConversationView({
   }
   
   return (
-    <div ref={conversationRootRef} className="flex flex-col h-full bg-background">
+    <div ref={conversationRootRef} className="chat-canvas flex h-full flex-col bg-background">
       {/* Header */}
       <ConversationHeader
         conversation={conversation}
@@ -623,7 +623,7 @@ function PinnedMessageBanner({
   );
 
   return (
-    <div className="border-b bg-background/95 px-3 py-2 backdrop-blur">
+    <div className="border-b border-border/80 bg-background/95 px-3 py-2 backdrop-blur">
       {isLoaded ? (
         <button type="button" className="w-full text-left" onClick={onClick}>
           {content}
@@ -687,7 +687,7 @@ function ConversationHeader({
     .slice(0, 2);
   
   return (
-    <div className="flex items-center gap-3 p-3 border-b bg-background">
+    <div className="flex items-center gap-3 border-b border-border/80 bg-sidebar px-3 py-3">
       {showBackButton && (
         <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={onBack}>
           <ArrowLeft className="h-5 w-5" />
@@ -703,7 +703,7 @@ function ConversationHeader({
       
       <button
         type="button"
-        className="flex-1 min-w-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/50"
+        className="flex-1 min-w-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-accent/70"
         onClick={onInfoClick}
       >
         <div className="font-medium truncate">{participantName}</div>
@@ -824,7 +824,7 @@ function ConversationSearchBar({
   const currentMatchLabel = totalMatches === 0 ? '0/0' : `${activeMatchIndex + 1}/${totalMatches}`;
 
   return (
-    <div className="border-b bg-background px-3 py-2">
+    <div className="border-b border-border/80 bg-sidebar px-3 py-2">
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -973,7 +973,7 @@ function MessageList({
         {groupedMessages.map((group, groupIndex) => (
           <div key={groupIndex}>
             <div className="sticky top-0 z-10 -mx-4 mb-4 flex justify-center px-4 py-2">
-              <span className="rounded-full bg-muted/95 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
+              <span className="rounded-full bg-card/95 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
                 {formatDateHeaderInIst(group.date)}
               </span>
             </div>
@@ -1038,8 +1038,9 @@ function MessageBubble({
   
   const renderStatusIcon = () => {
     if (isSending) return <Clock className="h-3 w-3" />;
-    if (isSent) return <Check className="h-3 w-3" />;
-    if (isDelivered || isRead) return <CheckCheck className={cn('h-3 w-3', isRead && 'text-primary')} />;
+    if (isSent) return <Check className="h-3 w-3 opacity-75" />;
+    if (isDelivered) return <CheckCheck className="h-3 w-3 opacity-75" />;
+    if (isRead) return <CheckCheck className="h-3 w-3 text-[#53bdeb]" />;
     return null;
   };
 
@@ -1110,10 +1111,10 @@ function MessageBubble({
       {isOwn ? messageMenu : null}
       <div
         className={cn(
-          'w-fit max-w-[min(85vw,24rem)] rounded-lg px-3 py-2 transition-shadow',
+          'w-fit max-w-[min(85vw,24rem)] rounded-[7.5px] px-3 py-2 transition-shadow',
           isOwn
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted',
+            ? 'bg-[var(--bubble-out)] text-[var(--bubble-out-foreground)] shadow-[0_1px_0_rgba(17,27,33,0.08)]'
+            : 'bg-[var(--bubble-in)] text-[var(--bubble-in-foreground)] shadow-[0_1px_0_rgba(17,27,33,0.06)]',
           message.isPinned && 'shadow-sm ring-1 ring-primary/30',
           message.isStarred && 'shadow-sm shadow-amber-400/20',
           isActiveMatch && 'ring-2 ring-primary/50 shadow-sm',
@@ -1124,7 +1125,7 @@ function MessageBubble({
           <div
             className={cn(
               'mb-1 flex items-center gap-2 text-[11px] font-medium',
-              isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground'
+              isOwn ? 'text-[var(--bubble-out-muted)]' : 'text-[var(--bubble-in-muted)]'
             )}
           >
             {message.isPinned ? (
@@ -1146,7 +1147,7 @@ function MessageBubble({
           <div
             className={cn(
               'flex items-center justify-end gap-1 mt-1 text-xs',
-              isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground'
+              isOwn ? 'text-[var(--bubble-out-muted)]' : 'text-[var(--bubble-in-muted)]'
             )}
           >
             <span>{formatTimeInIst(message.timestamp)}</span>
@@ -1306,14 +1307,14 @@ function MessageComposer({
   }, [conversationId]);
   
   return (
-    <div className="p-3 border-t bg-background">
+    <div className="border-t border-border/80 bg-sidebar px-3 py-3">
       {isBlocked ? (
         <div className="mb-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           This contact is blocked. Unblock the contact to send messages.
         </div>
       ) : null}
       {!isBlocked && !isServiceWindowOpen ? (
-        <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <div className="rounded-md border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
           Service window is inactive for this chat.
           {serviceWindowExpiresAt ? (
             <>
@@ -1325,7 +1326,7 @@ function MessageComposer({
         </div>
       ) : null}
       {isUploadingAttachment ? (
-        <div className="mb-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <div className="mb-2 rounded-md border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
           Uploading attachment...
         </div>
       ) : null}
@@ -1361,7 +1362,7 @@ function MessageComposer({
               onKeyDown={handleKeyDown}
               placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
               disabled={isBlocked || isUploadingAttachment}
-              className="pr-10"
+              className="rounded-full border-border/70 bg-input pr-10 shadow-none"
             />
             <Button
               variant="ghost"
