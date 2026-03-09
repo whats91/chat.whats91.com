@@ -244,6 +244,20 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort(compareConversations);
 }
 
+function areConversationListQueriesEqual(
+  left: ConversationListQuery,
+  right: ConversationListQuery
+): boolean {
+  return (
+    left.search === right.search &&
+    left.archived === right.archived &&
+    left.unreadOnly === right.unreadOnly &&
+    left.status === right.status &&
+    left.limit === right.limit &&
+    left.labelId === right.labelId
+  );
+}
+
 function mergeConversationPages(existing: Conversation[], incoming: Conversation[]): Conversation[] {
   const conversationMap = new Map(existing.map((conversation) => [conversation.id, conversation]));
 
@@ -432,6 +446,10 @@ export const useChatStore = create<ChatState>()(
           labelId: options.labelId ?? state.conversationListQuery.labelId,
         };
         const requestId = ++conversationListRequestSequence;
+        const isFreshTopLevelQuery =
+          !append &&
+          page === 1 &&
+          !areConversationListQueriesEqual(query, state.conversationListQuery);
 
         if (activeConversationListAbortController) {
           activeConversationListAbortController.abort();
@@ -440,7 +458,20 @@ export const useChatStore = create<ChatState>()(
         const abortController = new AbortController();
         activeConversationListAbortController = abortController;
 
-        set({ isLoadingConversations: true, conversationsError: null });
+        set({
+          isLoadingConversations: true,
+          conversationsError: null,
+          conversationListQuery: query,
+          ...(isFreshTopLevelQuery
+            ? {
+                conversations: [],
+                hasMoreConversations: false,
+                currentPage: 1,
+                totalPages: 1,
+                totalItems: 0,
+              }
+            : {}),
+        });
         
         try {
           const response = await fetchConversations({
