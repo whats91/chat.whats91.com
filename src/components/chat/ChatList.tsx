@@ -1,6 +1,6 @@
 'use client';
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { fetchCsrfToken, logout as logoutSession } from '@/lib/api/auth-client';
@@ -28,6 +28,7 @@ import {
   Trash2,
   Eraser,
   Search,
+  RefreshCw,
   MoreVertical,
   MessageSquarePlus,
   Loader2,
@@ -63,7 +64,6 @@ export function ChatList({ className }: ChatListProps) {
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [availableLabels, setAvailableLabels] = useState<ChatLabel[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const deferredSearchQuery = useDeferredValue(searchQuery);
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollAreaContainerRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
@@ -188,15 +188,21 @@ export function ChatList({ className }: ChatListProps) {
     setIsSearchOpen(false);
   }
 
+  function handleFullReload() {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  }
+
   useEffect(() => {
     void loadConversations({
       page: 1,
-      search: deferredSearchQuery.trim(),
+      search: searchQuery.trim(),
       archived: filter === 'archived',
       unreadOnly: filter === 'unread',
       labelId: selectedLabelId || undefined,
     });
-  }, [deferredSearchQuery, filter, loadConversations, selectedLabelId]);
+  }, [filter, loadConversations, searchQuery, selectedLabelId]);
 
   useEffect(() => {
     const root = scrollAreaContainerRef.current?.querySelector('[data-slot="scroll-area-viewport"]');
@@ -285,6 +291,14 @@ export function ChatList({ className }: ChatListProps) {
               variant="ghost"
               size="icon"
               className="h-8 w-8"
+              onClick={handleFullReload}
+            >
+              <RefreshCw className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
               onClick={() => toggleNewChatModal()}
             >
               <MessageSquarePlus className="h-5 w-5" />
@@ -357,8 +371,8 @@ export function ChatList({ className }: ChatListProps) {
           >
             All
           </Button>
-          <div className="min-w-0 flex-1 overflow-x-auto">
-            <div className="flex min-w-max items-center gap-1 pr-1">
+          <div className="min-w-0 flex-1 overflow-x-auto scroll-smooth overscroll-x-contain [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex min-w-max items-center gap-1 pr-1 [touch-action:pan-x]">
               <Button
                 variant={filter === 'unread' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
