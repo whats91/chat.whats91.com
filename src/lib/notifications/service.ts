@@ -54,6 +54,10 @@ export function isSupported(): boolean {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
 
+export function isSecureNotificationContext(): boolean {
+  return typeof window !== 'undefined' && window.isSecureContext;
+}
+
 /**
  * Check if service worker is supported
  */
@@ -85,14 +89,81 @@ export async function requestPermission(): Promise<boolean> {
     console.warn('[Notification] Not supported in this browser');
     return false;
   }
+
+  if (!isSecureNotificationContext()) {
+    console.warn('[Notification] Secure context is required for browser notifications');
+    return false;
+  }
   
   try {
-    const permission = await Notification.requestPermission();
+    const permission = await new Promise<NotificationPermission>((resolve, reject) => {
+      try {
+        const maybePromise = Notification.requestPermission((result) => {
+          resolve(result);
+        });
+
+        if (maybePromise && typeof maybePromise.then === 'function') {
+          maybePromise.then(resolve).catch(reject);
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
     console.log('[Notification] Permission:', permission);
     return permission === 'granted';
   } catch (error) {
     console.error('[Notification] Permission request failed:', error);
     return false;
+  }
+}
+
+function registerNotificationCallback(
+  tag: string | undefined,
+  callback: NotificationCallback | undefined
+): void {
+  if (tag && callback) {
+    notificationCallbacks.set(tag, callback);
+  }
+}
+
+function attachNativeNotificationHandlers(
+  notification: Notification,
+  tag: string | undefined
+): Notification {
+  notification.onclick = () => {
+    const callback = tag ? notificationCallbacks.get(tag) : null;
+    if (callback) {
+      callback(notification);
+    }
+
+    window.focus();
+    notification.close();
+  };
+
+  notification.onclose = () => {
+    if (tag) {
+      notificationCallbacks.delete(tag);
+    }
+  };
+
+  return notification;
+}
+
+function tryShowNativeNotification(options: NotificationOptions): Notification | null {
+  try {
+    const notification = new Notification(options.title, {
+      body: options.body,
+      icon: options.icon || '/icons/icon-192x192.png',
+      tag: options.tag,
+      data: options.data,
+      requireInteraction: options.requireInteraction,
+      silent: options.silent,
+    });
+
+    return attachNativeNotificationHandlers(notification, options.tag);
+  } catch (error) {
+    console.warn('[Notification] Native Notification API failed, falling back to service worker', error);
+    return null;
   }
 }
 
@@ -112,6 +183,11 @@ export async function show(options: NotificationOptions): Promise<Notification |
   }
   
   try {
+    const nativeNotification = tryShowNativeNotification(options);
+    if (nativeNotification) {
+      return nativeNotification;
+    }
+
     if (isServiceWorkerSupported()) {
       const registration = await navigator.serviceWorker.ready;
 
@@ -132,37 +208,8 @@ export async function show(options: NotificationOptions): Promise<Notification |
       await registration.showNotification(options.title, notificationOptions);
       return null; // Service worker handles the notification
     }
-    
-    // Fall back to regular notification
-    const notification = new Notification(options.title, {
-      body: options.body,
-      icon: options.icon || '/icons/icon-192x192.png',
-      tag: options.tag,
-      data: options.data,
-      requireInteraction: options.requireInteraction,
-      silent: options.silent,
-    });
-    
-    // Handle click
-    notification.onclick = () => {
-      const callback = options.tag ? notificationCallbacks.get(options.tag) : null;
-      if (callback) {
-        callback(notification);
-      }
-      
-      // Focus window
-      window.focus();
-      notification.close();
-    };
-    
-    // Handle close
-    notification.onclose = () => {
-      if (options.tag) {
-        notificationCallbacks.delete(options.tag);
-      }
-    };
-    
-    return notification;
+
+    return null;
   } catch (error) {
     console.error('[Notification] Failed to show:', error);
     return null;
@@ -188,9 +235,10 @@ export async function showMessageNotification(data: {
   const previewText = getPreviewText(messageType, messageContent);
   
   // Register callback
-  if (onClick) {
-    notificationCallbacks.set(`conv-${conversationId}`, () => onClick());
-  }
+  registerNotificationCallback(
+    `conv-${conversationId}`,
+    onClick ? () => onClick() : undefined
+  );
   
   return show({
     title: contactName || `+${contactPhone}`,
@@ -213,6 +261,16 @@ export async function showMessageNotification(data: {
       { action: 'open', title: 'Open chat' },
       { action: 'dismiss', title: 'Dismiss' },
     ],
+  });
+}
+
+export async function showPermissionGrantedNotification(): Promise<Notification | null> {
+  return show({
+    title: 'Notifications enabled',
+    body: 'You will now receive live message alerts in Whats91.',
+    tag: 'notifications-enabled',
+    silent: true,
+    icon: '/icons/icon-192x192.png',
   });
 }
 
@@ -328,12 +386,14 @@ export async function init(): Promise<boolean> {
 // Export notification service
 export const notificationService = {
   isSupported,
+  isSecureNotificationContext,
   isServiceWorkerSupported,
   getPermissionState,
   requestPermission,
   show,
   showMessageNotification,
   showStatusNotification,
+  showPermissionGrantedNotification,
   close,
   closeAll,
   init,

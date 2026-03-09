@@ -25,6 +25,7 @@ import {
   updateNotificationPreference,
   type NotificationPreferences,
 } from '@/lib/notifications/preferences';
+import { showPermissionGrantedNotification } from '@/lib/notifications/service';
 
 export default function SettingsPage() {
   const { isSocketConnected } = useChatStore();
@@ -47,6 +48,13 @@ export default function SettingsPage() {
   ) => {
     const nextPreferences = updateNotificationPreference(key, value);
     setPreferences(nextPreferences);
+  };
+
+  const handleEnableNotifications = async () => {
+    const granted = await requestPermission();
+    if (granted) {
+      await showPermissionGrantedNotification();
+    }
   };
   
   return (
@@ -166,7 +174,7 @@ export default function SettingsPage() {
                     </p>
                   </div>
                   {notificationsSupported && !isGranted && (
-                    <Button onClick={requestPermission} size="sm">
+                    <Button onClick={handleEnableNotifications} size="sm">
                       Enable
                     </Button>
                   )}

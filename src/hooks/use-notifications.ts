@@ -57,6 +57,28 @@ export function useNotifications(options: UseNotificationOptions = {}) {
     }
   }, [requestOnMount, state.supported, state.permission.default, requestPermission]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const refreshPermissionState = () => {
+      setState((prev) => ({
+        ...prev,
+        supported: notificationService.isSupported(),
+        permission: notificationService.getPermissionState(),
+      }));
+    };
+
+    window.addEventListener('focus', refreshPermissionState);
+    document.addEventListener('visibilitychange', refreshPermissionState);
+
+    return () => {
+      window.removeEventListener('focus', refreshPermissionState);
+      document.removeEventListener('visibilitychange', refreshPermissionState);
+    };
+  }, []);
+
   const show = useCallback(async (options: NotificationOptions) => {
     if (!state.supported || !state.permission.granted) {
       return null;
