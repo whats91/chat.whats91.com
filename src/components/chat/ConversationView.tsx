@@ -1325,7 +1325,7 @@ function MessageComposer({
   }, [conversationId]);
   
   return (
-    <div className="border-t border-border/80 bg-sidebar px-3 py-3">
+    <div className="border-t border-border/80 bg-sidebar px-2 py-2 md:px-3 md:py-3">
       {isBlocked ? (
         <div className="mb-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           This contact is blocked. Unblock the contact to send messages.
@@ -1352,47 +1352,50 @@ function MessageComposer({
         <>
           <div className="mb-2 md:hidden">
             {isMobileUtilityTrayOpen ? (
-              <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-card/80 px-2 py-2">
+              <div className="mb-1 flex flex-col items-start gap-1 pl-1">
                 <EmojiPicker
                   disabled={isBlocked || isUploadingAttachment}
                   onSelectEmoji={insertEmoji}
+                  triggerClassName="h-10 w-10 rounded-full bg-transparent p-0 hover:bg-transparent"
+                  iconClassName="h-5 w-5 text-foreground/75 dark:text-white"
+                  contentClassName="mr-2"
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-9 w-9 flex-shrink-0"
+                  className="h-10 w-10 flex-shrink-0 rounded-full bg-transparent p-0 hover:bg-transparent"
                   disabled={isBlocked || isUploadingAttachment}
                   onClick={handleOpenMediaPicker}
                 >
-                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                  <ImageIcon className="h-5 w-5 text-foreground/75 dark:text-white" />
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-9 w-9 flex-shrink-0"
+                  className="h-10 w-10 flex-shrink-0 rounded-full bg-transparent p-0 hover:bg-transparent"
                   disabled={isBlocked || isUploadingAttachment}
                   onClick={handleOpenAttachmentPicker}
                 >
-                  <FileText className="h-5 w-5 text-muted-foreground" />
+                  <FileText className="h-5 w-5 text-foreground/75 dark:text-white" />
                 </Button>
               </div>
             ) : null}
-            <div className="flex items-end gap-2 md:hidden">
-              <div className="basis-[15%]">
+            <div className="flex items-center gap-1 md:hidden">
+              <div className="flex w-10 flex-shrink-0 justify-start">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-10 w-10 rounded-full"
+                  className="h-11 w-11 rounded-full bg-transparent p-0 hover:bg-transparent"
                   disabled={isBlocked || isUploadingAttachment}
                   onClick={() => setIsMobileUtilityTrayOpen((current) => !current)}
                 >
-                  <Plus className="h-5 w-5 text-muted-foreground" />
+                  <Plus className="h-6 w-6 text-foreground/85 dark:text-white" />
                 </Button>
               </div>
-              <div className="relative min-w-0 basis-[70%]">
+              <div className="relative min-w-0 flex-1">
                 <Input
                   ref={mobileMessageInputRef}
                   value={message}
@@ -1400,10 +1403,10 @@ function MessageComposer({
                   onKeyDown={handleKeyDown}
                   placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
                   disabled={isBlocked || isUploadingAttachment}
-                  className="rounded-full border-border/70 bg-input shadow-none"
+                  className="h-10 rounded-full border-border/70 bg-input px-3 shadow-none"
                 />
               </div>
-              <div className="flex basis-[15%] justify-end">
+              <div className="flex w-10 flex-shrink-0 justify-end">
                 {!isBlocked && !isUploadingAttachment && message.trim() ? (
                   <Button
                     size="icon"

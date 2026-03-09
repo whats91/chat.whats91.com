@@ -78,9 +78,18 @@ const EMOJI_CATEGORIES: EmojiCategory[] = [
 interface EmojiPickerProps {
   disabled?: boolean;
   onSelectEmoji: (emoji: string) => void;
+  triggerClassName?: string;
+  iconClassName?: string;
+  contentClassName?: string;
 }
 
-export function EmojiPicker({ disabled = false, onSelectEmoji }: EmojiPickerProps) {
+export function EmojiPicker({
+  disabled = false,
+  onSelectEmoji,
+  triggerClassName,
+  iconClassName,
+  contentClassName,
+}: EmojiPickerProps) {
   const [open, setOpen] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState(EMOJI_CATEGORIES[0].id);
 
@@ -92,24 +101,40 @@ export function EmojiPicker({ disabled = false, onSelectEmoji }: EmojiPickerProp
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-9 w-9 flex-shrink-0" disabled={disabled}>
-          <Smile className="h-5 w-5 text-muted-foreground" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('h-9 w-9 flex-shrink-0', triggerClassName)}
+          disabled={disabled}
+        >
+          <Smile className={cn('h-5 w-5 text-muted-foreground', iconClassName)} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" side="top" className="w-[23rem] p-0">
+      <PopoverContent
+        align="start"
+        side="top"
+        collisionPadding={8}
+        className={cn(
+          'w-[min(23rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0',
+          contentClassName
+        )}
+      >
         <div className="border-b px-4 py-3">
           <div className="text-sm font-medium">Emoji</div>
           <div className="text-xs text-muted-foreground">{activeCategory.label}</div>
         </div>
 
-        <ScrollArea className="h-72 px-3 py-3">
-          <div className="grid grid-cols-8 gap-1">
+        <ScrollArea className="h-[min(18rem,55vh)] px-3 py-3 sm:h-72">
+          <div className="grid grid-cols-7 gap-1 sm:grid-cols-8">
             {activeCategory.emojis.map((emoji) => (
               <button
                 key={`${activeCategory.id}-${emoji}`}
                 type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-md text-2xl transition-colors hover:bg-muted"
-                onClick={() => onSelectEmoji(emoji)}
+                className="flex h-10 w-full items-center justify-center rounded-md text-2xl transition-colors hover:bg-muted"
+                onClick={() => {
+                  onSelectEmoji(emoji);
+                  setOpen(false);
+                }}
               >
                 <span aria-hidden="true">{emoji}</span>
                 <span className="sr-only">{emoji}</span>
@@ -118,7 +143,7 @@ export function EmojiPicker({ disabled = false, onSelectEmoji }: EmojiPickerProp
           </div>
         </ScrollArea>
 
-        <div className="grid grid-cols-8 border-t bg-muted/30 p-1">
+        <div className="grid grid-cols-7 border-t bg-muted/30 p-1 sm:grid-cols-8">
           {EMOJI_CATEGORIES.map((category) => {
             const Icon = category.icon;
 
