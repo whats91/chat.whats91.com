@@ -30,6 +30,7 @@ import {
   Search,
   RefreshCw,
   MoreVertical,
+  Ellipsis,
   MessageSquarePlus,
   Loader2,
   FileSpreadsheet,
@@ -245,6 +246,12 @@ export function ChatList({ className }: ChatListProps) {
       }),
     [conversations]
   );
+  const visibleLabels = useMemo(() => availableLabels.slice(0, 2), [availableLabels]);
+  const overflowLabels = useMemo(() => availableLabels.slice(2), [availableLabels]);
+  const hasActiveOverflowLabel = useMemo(
+    () => overflowLabels.some((label) => label.id === selectedLabelId),
+    [overflowLabels, selectedLabelId]
+  );
   
   const searchFiltered = useMemo(
     () =>
@@ -370,8 +377,7 @@ export function ChatList({ className }: ChatListProps) {
           >
             All
           </Button>
-          <div className="min-w-0 flex-1 overflow-x-auto scroll-smooth overscroll-x-contain [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex min-w-max items-center gap-1 pr-1 [touch-action:pan-x]">
+          <div className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden">
               <Button
                 variant={filter === 'unread' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
@@ -388,7 +394,7 @@ export function ChatList({ className }: ChatListProps) {
               >
                 Archived
               </Button>
-              {availableLabels.map((label) => {
+              {visibleLabels.map((label) => {
                 const isActive = selectedLabelId === label.id;
 
                 return (
@@ -410,7 +416,46 @@ export function ChatList({ className }: ChatListProps) {
                   </Button>
                 );
               })}
-            </div>
+              {overflowLabels.length > 0 ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant={hasActiveOverflowLabel ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="h-8 rounded-xl gap-1.5 px-3 text-xs"
+                    >
+                      <Ellipsis className="h-3.5 w-3.5" />
+                      <span>More</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    {overflowLabels.map((label) => {
+                      const isActive = selectedLabelId === label.id;
+
+                      return (
+                        <DropdownMenuItem
+                          key={label.id}
+                          onSelect={(event) => {
+                            event.preventDefault();
+                            handleFilterSelection('all', isActive ? null : label.id);
+                          }}
+                        >
+                          <span
+                            className="mr-2 h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: label.color }}
+                          />
+                          <span className="flex-1 truncate">{label.name}</span>
+                          {isActive ? (
+                            <Badge variant="secondary" className="ml-2 text-[10px]">
+                              Active
+                            </Badge>
+                          ) : null}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
           </div>
         </div>
       </div>
