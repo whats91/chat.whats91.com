@@ -64,6 +64,7 @@ export function ChatList({ className }: ChatListProps) {
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [availableLabels, setAvailableLabels] = useState<ChatLabel[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [filterRefreshToken, setFilterRefreshToken] = useState(0);
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollAreaContainerRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
@@ -186,12 +187,19 @@ export function ChatList({ className }: ChatListProps) {
     setSelectedLabelId(null);
     setSearchQuery('');
     setIsSearchOpen(false);
+    setFilterRefreshToken((current) => current + 1);
   }
 
   function handleFullReload() {
     if (typeof window !== 'undefined') {
       window.location.reload();
     }
+  }
+
+  function handleFilterSelection(nextFilter: 'all' | 'unread' | 'archived', nextLabelId: string | null = null) {
+    setFilter(nextFilter);
+    setSelectedLabelId(nextLabelId);
+    setFilterRefreshToken((current) => current + 1);
   }
 
   useEffect(() => {
@@ -202,7 +210,7 @@ export function ChatList({ className }: ChatListProps) {
       unreadOnly: filter === 'unread',
       labelId: selectedLabelId || undefined,
     });
-  }, [filter, loadConversations, searchQuery, selectedLabelId]);
+  }, [filter, filterRefreshToken, loadConversations, searchQuery, selectedLabelId]);
 
   useEffect(() => {
     const root = scrollAreaContainerRef.current?.querySelector('[data-slot="scroll-area-viewport"]');
@@ -377,10 +385,7 @@ export function ChatList({ className }: ChatListProps) {
                 variant={filter === 'unread' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
                 className="h-8 rounded-xl text-xs"
-                onClick={() => {
-                  setFilter('unread');
-                  setSelectedLabelId(null);
-                }}
+                onClick={() => handleFilterSelection('unread')}
               >
                 Unread
               </Button>
@@ -388,10 +393,7 @@ export function ChatList({ className }: ChatListProps) {
                 variant={filter === 'archived' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
                 className="h-8 rounded-xl text-xs"
-                onClick={() => {
-                  setFilter('archived');
-                  setSelectedLabelId(null);
-                }}
+                onClick={() => handleFilterSelection('archived')}
               >
                 Archived
               </Button>
@@ -405,8 +407,7 @@ export function ChatList({ className }: ChatListProps) {
                     size="sm"
                     className="h-8 rounded-xl gap-1.5 text-xs"
                     onClick={() => {
-                      setFilter('all');
-                      setSelectedLabelId((current) => (current === label.id ? null : label.id));
+                      handleFilterSelection('all', selectedLabelId === label.id ? null : label.id);
                     }}
                     title={`${label.name} • ${label.phoneNumber}`}
                   >
