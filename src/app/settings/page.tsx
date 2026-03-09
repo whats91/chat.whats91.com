@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTheme } from 'next-themes';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -16,6 +18,9 @@ import {
   Globe,
   Shield,
   Bell,
+  Monitor,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useNotifications } from '@/hooks/use-notifications';
@@ -27,19 +32,24 @@ import {
 } from '@/lib/notifications/preferences';
 import { showPermissionGrantedNotification } from '@/lib/notifications/service';
 
+type ThemePreference = 'light' | 'dark' | 'system';
+
 export default function SettingsPage() {
   const { isSocketConnected } = useChatStore();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const { 
     supported: notificationsSupported, 
     isGranted, 
     requestPermission 
   } = useNotifications();
+  const [isThemeReady, setIsThemeReady] = useState(false);
   const [preferences, setPreferences] = useState<NotificationPreferences>(
     DEFAULT_NOTIFICATION_PREFERENCES
   );
 
   useEffect(() => {
     setPreferences(getNotificationPreferences());
+    setIsThemeReady(true);
   }, []);
 
   const handlePreferenceChange = (
@@ -56,6 +66,13 @@ export default function SettingsPage() {
       await showPermissionGrantedNotification();
     }
   };
+
+  const selectedTheme: ThemePreference =
+    isThemeReady && (theme === 'light' || theme === 'dark' || theme === 'system')
+      ? theme
+      : 'system';
+  const activeThemeLabel =
+    resolvedTheme === 'dark' ? 'Dark' : resolvedTheme === 'light' ? 'Light' : 'System';
   
   return (
     <div className="flex-1 overflow-auto">
@@ -67,13 +84,88 @@ export default function SettingsPage() {
           </p>
         </div>
         
-        <Tabs defaultValue="channel" className="space-y-6">
+        <Tabs defaultValue="appearance" className="space-y-6">
           <TabsList>
+            <TabsTrigger value="appearance">Appearance</TabsTrigger>
             <TabsTrigger value="channel">Channel Setup</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
             <TabsTrigger value="about">About</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="appearance" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Monitor className="h-5 w-5" />
+                  Theme
+                </CardTitle>
+                <CardDescription>
+                  Override the system theme for this browser. Your choice is saved locally and reused on the next visit.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <RadioGroup
+                  value={selectedTheme}
+                  onValueChange={(value) => setTheme(value as ThemePreference)}
+                  className="grid gap-3 md:grid-cols-3"
+                >
+                  <Label
+                    htmlFor="theme-system"
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors hover:bg-muted/40"
+                  >
+                    <RadioGroupItem id="theme-system" value="system" className="mt-1" />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Monitor className="h-4 w-4" />
+                        Default
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Follow the device theme automatically.
+                      </p>
+                    </div>
+                  </Label>
+
+                  <Label
+                    htmlFor="theme-light"
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors hover:bg-muted/40"
+                  >
+                    <RadioGroupItem id="theme-light" value="light" className="mt-1" />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Sun className="h-4 w-4" />
+                        Light
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Always use the light theme.
+                      </p>
+                    </div>
+                  </Label>
+
+                  <Label
+                    htmlFor="theme-dark"
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors hover:bg-muted/40"
+                  >
+                    <RadioGroupItem id="theme-dark" value="dark" className="mt-1" />
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Moon className="h-4 w-4" />
+                        Dark
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Always use the dark theme.
+                      </p>
+                    </div>
+                  </Label>
+                </RadioGroup>
+
+                <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  Selected mode: <span className="font-medium text-foreground capitalize">{selectedTheme}</span>
+                  {' '}• Effective theme: <span className="font-medium text-foreground">{activeThemeLabel}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
           
           <TabsContent value="channel" className="space-y-6">
             {/* Connection Status */}

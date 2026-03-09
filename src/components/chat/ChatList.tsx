@@ -229,7 +229,14 @@ export function ChatList({ className }: ChatListProps) {
                   {isExportingAll ? 'Exporting...' : 'Export all'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Settings</DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    router.push('/settings');
+                  }}
+                >
+                  Settings
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={(event) => {
                   event.preventDefault();

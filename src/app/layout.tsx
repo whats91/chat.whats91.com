@@ -115,6 +115,7 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
+          storageKey="whats91-theme-mode"
           disableTransitionOnChange
         >
           {children}
