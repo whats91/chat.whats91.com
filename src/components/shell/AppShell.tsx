@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import type { Message } from '@/lib/types/chat';
 import type {
   LegacyPubSubMessagePayload,
@@ -833,28 +833,133 @@ export function AppShell() {
 
 function DesktopShell() {
   const { selectedConversationId, isRightPanelOpen } = useChatStore();
+  const desktopShellRef = useRef<HTMLDivElement | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(384);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+
+  const clampSidebarWidth = useCallback(
+    (requestedWidth: number) => {
+      const rootRect = desktopShellRef.current?.getBoundingClientRect();
+      const containerWidth = rootRect?.width || (typeof window !== 'undefined' ? window.innerWidth : 1440);
+      const minSidebarWidth = 320;
+      const minMainContentWidth = isRightPanelOpen ? 720 : 520;
+      const maxSidebarWidth = Math.max(minSidebarWidth, containerWidth - minMainContentWidth);
+
+      return Math.min(maxSidebarWidth, Math.max(minSidebarWidth, requestedWidth));
+    },
+    [isRightPanelOpen]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storedWidth = window.localStorage.getItem('whats91.desktop.sidebar-width');
+    if (!storedWidth) {
+      return;
+    }
+
+    const parsedWidth = Number(storedWidth);
+    if (!Number.isFinite(parsedWidth)) {
+      return;
+    }
+
+    setSidebarWidth(clampSidebarWidth(parsedWidth));
+  }, [clampSidebarWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      'whats91.desktop.sidebar-width',
+      String(Math.round(sidebarWidth))
+    );
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isDraggingSidebar) {
+      return;
+    }
+
+    const rootElement = desktopShellRef.current;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const rootRect = rootElement?.getBoundingClientRect();
+      const containerLeft = rootRect?.left || 0;
+      const nextWidth = clampSidebarWidth(event.clientX - containerLeft);
+
+      setSidebarWidth(nextWidth);
+    };
+
+    const stopDragging = () => {
+      setIsDraggingSidebar(false);
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopDragging);
+    window.addEventListener('pointercancel', stopDragging);
+
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopDragging);
+      window.removeEventListener('pointercancel', stopDragging);
+    };
+  }, [clampSidebarWidth, isDraggingSidebar]);
   
   return (
     <>
-      {/* Sidebar */}
-      <div className="w-96 border-r flex-shrink-0 h-full">
-        <ChatList />
-      </div>
-      
-      {/* Main Content - h-full is critical for child height calculation */}
-      <div className="flex-1 h-full flex overflow-hidden">
-        {selectedConversationId ? (
-          <>
-            <div className="flex-1 h-full flex flex-col overflow-hidden">
-              <ConversationView conversationId={selectedConversationId} />
-            </div>
-            {isRightPanelOpen && (
-              <RightInfoPanel conversationId={selectedConversationId} />
+      <div ref={desktopShellRef} className="flex h-full flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div
+          className="h-full flex-shrink-0 border-r"
+          style={{ width: `${sidebarWidth}px` }}
+        >
+          <ChatList />
+        </div>
+
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chat list"
+          className={cn(
+            'group relative z-10 hidden w-3 flex-shrink-0 cursor-col-resize touch-none items-stretch justify-center bg-transparent md:flex'
+          )}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            setIsDraggingSidebar(true);
+          }}
+        >
+          <div
+            className={cn(
+              'w-px bg-border transition-colors group-hover:bg-primary/50',
+              isDraggingSidebar ? 'bg-primary/60' : ''
             )}
-          </>
-        ) : (
-          <EmptyState />
-        )}
+          />
+        </div>
+
+        {/* Main Content - h-full is critical for child height calculation */}
+        <div className="flex-1 h-full flex overflow-hidden">
+          {selectedConversationId ? (
+            <>
+              <div className="flex-1 h-full flex flex-col overflow-hidden">
+                <ConversationView conversationId={selectedConversationId} />
+              </div>
+              {isRightPanelOpen && (
+                <RightInfoPanel conversationId={selectedConversationId} />
+              )}
+            </>
+          ) : (
+            <EmptyState />
+          )}
+        </div>
       </div>
     </>
   );

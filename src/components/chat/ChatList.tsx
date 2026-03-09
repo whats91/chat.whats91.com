@@ -377,11 +377,12 @@ export function ChatList({ className }: ChatListProps) {
           >
             All
           </Button>
-          <div className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden">
+          <div className="min-w-0 flex flex-1 items-center gap-1">
+            <div className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden">
               <Button
                 variant={filter === 'unread' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-8 rounded-xl text-xs"
+                className="h-8 shrink-0 rounded-xl px-3 text-xs"
                 onClick={() => handleFilterSelection('unread')}
               >
                 Unread
@@ -389,7 +390,7 @@ export function ChatList({ className }: ChatListProps) {
               <Button
                 variant={filter === 'archived' && !selectedLabelId ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-8 rounded-xl text-xs"
+                className="h-8 shrink-0 rounded-xl px-3 text-xs"
                 onClick={() => handleFilterSelection('archived')}
               >
                 Archived
@@ -402,60 +403,61 @@ export function ChatList({ className }: ChatListProps) {
                     key={label.id}
                     variant={isActive ? 'secondary' : 'ghost'}
                     size="sm"
-                    className="h-8 rounded-xl gap-1.5 text-xs"
+                    className="h-8 max-w-[7.5rem] shrink-0 rounded-xl px-3 text-xs"
                     onClick={() => {
                       handleFilterSelection('all', selectedLabelId === label.id ? null : label.id);
                     }}
                     title={`${label.name} • ${label.phoneNumber}`}
                   >
                     <span
-                      className="h-1.5 w-1.5 rounded-full"
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
                       style={{ backgroundColor: label.color }}
                     />
-                    <span>{label.name}</span>
+                    <span className="truncate">{label.name}</span>
                   </Button>
                 );
               })}
-              {overflowLabels.length > 0 ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant={hasActiveOverflowLabel ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="h-8 rounded-xl gap-1.5 px-3 text-xs"
-                    >
-                      <Ellipsis className="h-3.5 w-3.5" />
-                      <span>More</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    {overflowLabels.map((label) => {
-                      const isActive = selectedLabelId === label.id;
+            </div>
+            {overflowLabels.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant={hasActiveOverflowLabel ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="h-8 shrink-0 rounded-xl gap-1.5 px-3 text-xs"
+                  >
+                    <Ellipsis className="h-3.5 w-3.5" />
+                    <span>More</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  {overflowLabels.map((label) => {
+                    const isActive = selectedLabelId === label.id;
 
-                      return (
-                        <DropdownMenuItem
-                          key={label.id}
-                          onSelect={(event) => {
-                            event.preventDefault();
-                            handleFilterSelection('all', isActive ? null : label.id);
-                          }}
-                        >
-                          <span
-                            className="mr-2 h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: label.color }}
-                          />
-                          <span className="flex-1 truncate">{label.name}</span>
-                          {isActive ? (
-                            <Badge variant="secondary" className="ml-2 text-[10px]">
-                              Active
-                            </Badge>
-                          ) : null}
-                        </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
+                    return (
+                      <DropdownMenuItem
+                        key={label.id}
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          handleFilterSelection('all', isActive ? null : label.id);
+                        }}
+                      >
+                        <span
+                          className="mr-2 h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: label.color }}
+                        />
+                        <span className="flex-1 truncate">{label.name}</span>
+                        {isActive ? (
+                          <Badge variant="secondary" className="ml-2 text-[10px]">
+                            Active
+                          </Badge>
+                        ) : null}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
         </div>
       </div>
