@@ -97,6 +97,15 @@ export interface Message {
 
 export type ConversationStatus = 'active' | 'closed' | 'blocked';
 
+export interface ChatLabel {
+  id: string;
+  uid: string;
+  userId: string;
+  phoneNumber: string;
+  name: string;
+  color: string;
+}
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -128,6 +137,7 @@ export interface Conversation {
   
   // Metadata
   metaData?: Record<string, unknown> | null;
+  labels: ChatLabel[];
   
   // Relations
   participant?: User;
@@ -162,6 +172,7 @@ export interface ConversationListItem {
   isMuted: boolean;
   isBlocked: boolean;
   status: ConversationStatus;
+  labels: ChatLabel[];
 }
 
 // ========================================
@@ -389,6 +400,7 @@ export interface ConversationDetailResponse {
       serviceWindowStartedAt: Date | string | null;
       serviceWindowExpiresAt: Date | string | null;
       status: ConversationStatus;
+      labels: ChatLabel[];
     };
     messages: Message[];
     pagination: {
@@ -456,6 +468,16 @@ export interface StartConversationResponse {
     displayName: string;
     contactPhone: string;
     contactName: string | null;
+  } | null;
+}
+
+export interface ConversationLabelsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    availableLabels: ChatLabel[];
+    assignedLabels: ChatLabel[];
+    conversationId: string;
   } | null;
 }
 

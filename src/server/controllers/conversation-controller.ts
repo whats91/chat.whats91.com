@@ -16,6 +16,7 @@
 
 import 'server-only';
 import type { 
+  ChatLabel,
   ConversationListItem,
   Message,
   MessageDirection,
@@ -32,6 +33,7 @@ import {
 import { uploadMediaToMeta } from '../whatsapp/media-upload';
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
 import { findCloudApiSetupByUserAndPhoneNumberId, findDefaultCloudApiSetupByUser } from '../db/cloud-api-setup';
+import { getChatLabelsByIds, getChatLabelsByUserAndPhoneNumber } from '../db/chat-labels';
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
 import { buildConversationMediaProxyUrl, MEDIA_MESSAGE_TYPES } from '@/lib/media/conversation-media';
 import { db } from '@/lib/db';
@@ -367,6 +369,106 @@ async function applyMessageHistoryStatuses(messages: Message[]): Promise<Message
   });
 }
 
+type ConversationLabelLinkRow = {
+  conversation_id: number | string | bigint;
+  label_id: number | string | bigint;
+};
+
+function normalizeIdentifier(value: string | number | bigint | null | undefined): string {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : '';
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return '';
+}
+
+async function getConversationAssignedLabelMap(
+  userId: string,
+  conversationIds: number[]
+): Promise<Map<string, ChatLabel[]>> {
+  const normalizedConversationIds = Array.from(new Set(conversationIds.filter((id) => Number.isFinite(id))));
+  if (normalizedConversationIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = normalizedConversationIds.map(() => '?').join(', ');
+  const links = await queryConversationsDb<ConversationLabelLinkRow>(
+    `SELECT conversation_id, label_id
+     FROM conversation_labels
+     WHERE conversation_id IN (${placeholders})`,
+    normalizedConversationIds
+  );
+
+  if (links.length === 0) {
+    return new Map();
+  }
+
+  const labelIds = Array.from(
+    new Set(
+      links
+        .map((link) => normalizeIdentifier(link.label_id))
+        .filter(Boolean)
+    )
+  );
+
+  const labels = await getChatLabelsByIds(userId, labelIds);
+  const labelMap = new Map(labels.map((label) => [label.id, label]));
+  const assignedLabels = new Map<string, ChatLabel[]>();
+
+  for (const link of links) {
+    const conversationKey = normalizeIdentifier(link.conversation_id);
+    const labelKey = normalizeIdentifier(link.label_id);
+    const label = labelMap.get(labelKey);
+
+    if (!conversationKey || !label) {
+      continue;
+    }
+
+    const existing = assignedLabels.get(conversationKey) || [];
+    existing.push(label);
+    assignedLabels.set(conversationKey, existing);
+  }
+
+  for (const [conversationKey, conversationLabels] of assignedLabels.entries()) {
+    const uniqueLabels = Array.from(new Map(conversationLabels.map((label) => [label.id, label])).values());
+    assignedLabels.set(
+      conversationKey,
+      uniqueLabels.sort((left, right) => left.name.localeCompare(right.name))
+    );
+  }
+
+  return assignedLabels;
+}
+
+async function resolveConversationPhoneNumberForLabels(
+  conversation: {
+    phone_number?: string | null;
+    whatsapp_phone_number_id?: string | null;
+  },
+  userId: string
+): Promise<string | null> {
+  const directPhoneNumber = getStringValue(conversation.phone_number);
+  if (directPhoneNumber) {
+    return directPhoneNumber;
+  }
+
+  const phoneNumberId = getStringValue(conversation.whatsapp_phone_number_id);
+  if (!phoneNumberId) {
+    return null;
+  }
+
+  const setup = await findCloudApiSetupByUserAndPhoneNumberId(userId, phoneNumberId);
+  return setup?.phoneNumber || null;
+}
+
 function isMediaMessageType(value: string | null | undefined): boolean {
   return Boolean(value && MEDIA_MESSAGE_TYPES.has(value));
 }
@@ -680,6 +782,10 @@ export async function getConversations({
     
     // Execute query
     const conversations = await queryConversationsDb<any>(sql, params);
+    const labelsByConversation = await getConversationAssignedLabelMap(
+      userId,
+      conversations.map((conversation) => toSafeNumber(conversation.id))
+    );
     
     // Get total count
     let countSql = `SELECT COUNT(*) as total FROM conversations WHERE user_id = ?`;
@@ -729,6 +835,7 @@ export async function getConversations({
       isMuted: conv.is_muted || false,
       isBlocked: conv.is_blocked || false,
       status: conv.status,
+      labels: labelsByConversation.get(String(conv.id)) || [],
     }));
     
     // Get unread count summary
@@ -1096,6 +1203,7 @@ export async function getConversationById({
     }
 
     const serviceWindow = await getConversationServiceWindowState(conversationId, userId);
+    const labelsByConversation = await getConversationAssignedLabelMap(userId, [conversationId]);
     
     // Get messages (oldest first for display)
     const offset = (page - 1) * limit;
@@ -1143,6 +1251,7 @@ export async function getConversationById({
           serviceWindowStartedAt: serviceWindow.lastInboundMessageAt,
           serviceWindowExpiresAt: serviceWindow.expiresAt,
           status: conversation.status,
+          labels: labelsByConversation.get(String(conversationId)) || [],
         },
         messages: formattedMessages,
         pagination: {
@@ -2071,6 +2180,113 @@ export async function updateConversationName(
 }
 
 // ========================================
+// CONVERSATION LABELS
+// ========================================
+
+export async function getConversationLabels(conversationId: number, userId: string) {
+  try {
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT id, phone_number, whatsapp_phone_number_id
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found', data: null };
+    }
+
+    const phoneNumber = await resolveConversationPhoneNumberForLabels(conversation, userId);
+    const availableLabels = phoneNumber
+      ? await getChatLabelsByUserAndPhoneNumber(userId, phoneNumber)
+      : [];
+    const assignedLabels = (await getConversationAssignedLabelMap(userId, [conversationId])).get(String(conversationId)) || [];
+
+    return {
+      success: true,
+      message: 'Conversation labels retrieved successfully',
+      data: {
+        conversationId: String(conversationId),
+        availableLabels,
+        assignedLabels,
+      },
+    };
+  } catch (error) {
+    log.error('getConversationLabels error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to retrieve conversation labels', data: null };
+  }
+}
+
+export async function updateConversationLabels(
+  conversationId: number,
+  userId: string,
+  labelIds: Array<string | number>
+) {
+  try {
+    const [conversation] = await queryConversationsDb<any>(
+      `SELECT id, phone_number, whatsapp_phone_number_id
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found', data: null };
+    }
+
+    const phoneNumber = await resolveConversationPhoneNumberForLabels(conversation, userId);
+    const availableLabels = phoneNumber
+      ? await getChatLabelsByUserAndPhoneNumber(userId, phoneNumber)
+      : [];
+    const availableLabelIds = new Set(availableLabels.map((label) => label.id));
+    const normalizedLabelIds = Array.from(
+      new Set(labelIds.map((labelId) => normalizeIdentifier(labelId)).filter((labelId) => availableLabelIds.has(labelId)))
+    );
+
+    await executeConversationsDb(
+      `DELETE FROM conversation_labels WHERE conversation_id = ?`,
+      [conversationId]
+    );
+
+    if (normalizedLabelIds.length > 0) {
+      const valuesSql = normalizedLabelIds.map(() => '(?, ?)').join(', ');
+      const params = normalizedLabelIds.flatMap((labelId) => [conversationId, labelId]);
+
+      await executeConversationsDb(
+        `INSERT INTO conversation_labels (conversation_id, label_id)
+         VALUES ${valuesSql}`,
+        params
+      );
+    }
+
+    const assignedLabels = availableLabels.filter((label) => normalizedLabelIds.includes(label.id));
+
+    return {
+      success: true,
+      message: 'Conversation labels updated successfully',
+      data: {
+        conversationId: String(conversationId),
+        availableLabels,
+        assignedLabels,
+      },
+    };
+  } catch (error) {
+    log.error('updateConversationLabels error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return { success: false, message: 'Failed to update conversation labels', data: null };
+  }
+}
+
+// ========================================
 // CLEAR CONVERSATION
 // ========================================
 
@@ -2809,6 +3025,8 @@ export const conversationController = {
   toggleMute: toggleMuteConversation,
   toggleBlock: toggleBlockConversation,
   updateConversationName,
+  getConversationLabels,
+  updateConversationLabels,
   toggleMessagePinned,
   toggleMessageStarred,
   clear: clearConversation,

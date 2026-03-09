@@ -390,6 +390,9 @@ function ChatListItem({
   const participantAvatar = participant?.avatar;
   const participantStatus = participant?.status;
   const hasDedicatedContactName = Boolean(conversation.contactName?.trim());
+  const assignedLabels = conversation.labels || [];
+  const visibleLabels = assignedLabels.slice(0, 2);
+  const remainingLabelCount = Math.max(assignedLabels.length - visibleLabels.length, 0);
   const lastMessagePreview = typing?.isTyping
     ? null
     : lastMessage?.content || lastMessage?.mediaCaption || lastMessage?.mediaFilename || '';
@@ -435,17 +438,41 @@ function ChatListItem({
             {isMuted && <BellOff className="h-3 w-3 text-muted-foreground" />}
           </div>
           {hasDedicatedContactName ? (
-            <p className="mt-0.5 truncate text-[11px] font-medium tracking-[0.01em] text-foreground/75 dark:text-foreground/80">
+            <p className="mt-0.5 truncate text-[11px] font-medium tracking-[0.01em] text-foreground/80 dark:text-white/80">
               {participantPhone}
             </p>
           ) : null}
-          <p className="mt-0.5 truncate text-[12px] leading-4 text-foreground/70 dark:text-foreground/75">
-            {typing?.isTyping ? (
-              <span className="text-primary">typing...</span>
-            ) : (
-              lastMessagePreview || participantPhone
-            )}
-          </p>
+          <div className="mt-1 flex min-w-0 items-center gap-1.5">
+            {visibleLabels.length > 0 ? (
+              <div className="flex max-w-[45%] items-center gap-1 overflow-hidden">
+                {visibleLabels.map((label) => (
+                  <Badge
+                    key={label.id}
+                    variant="outline"
+                    className="flex min-w-0 items-center gap-1 rounded-full border-border/70 px-1.5 py-0 text-[10px] font-medium"
+                  >
+                    <span
+                      className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: label.color }}
+                    />
+                    <span className="truncate">{label.name}</span>
+                  </Badge>
+                ))}
+                {remainingLabelCount > 0 ? (
+                  <span className="text-[10px] font-medium text-muted-foreground">
+                    +{remainingLabelCount}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <p className="min-w-0 flex-1 truncate text-[12px] leading-4 text-foreground/75 dark:text-white/75">
+              {typing?.isTyping ? (
+                <span className="text-primary">typing...</span>
+              ) : (
+                lastMessagePreview || participantPhone
+              )}
+            </p>
+          </div>
         </div>
         <div className="flex flex-shrink-0 flex-col items-end gap-1.5 pt-0.5">
           <span className="text-[11px] text-foreground/60 dark:text-muted-foreground">

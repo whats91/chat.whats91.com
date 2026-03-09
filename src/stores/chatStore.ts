@@ -7,7 +7,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Conversation, Message, SendMessageRequest } from '@/lib/types/chat';
+import type { ChatLabel, Conversation, Message, SendMessageRequest } from '@/lib/types/chat';
 import {
   clearConversation as apiClearConversation,
   deleteConversation as apiDeleteConversation,
@@ -20,19 +20,13 @@ import {
   toggleMessageStarred as apiToggleMessageStarred,
   toggleMute as apiToggleMute,
   togglePin as apiTogglePin,
+  updateConversationLabels as apiUpdateConversationLabels,
   updateConversationName as apiUpdateConversationName,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
-import { mockLabels } from '@/lib/mock/data';
 import { debugPubSub } from '@/lib/pubsub/debug';
 
 const SERVICE_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
-
-interface ChatLabel {
-  id: string;
-  name: string;
-  color: string;
-}
 
 function parseTimestampCandidate(value: Message['timestamp'] | string | number | null | undefined): Date | null {
   if (value instanceof Date) {
@@ -262,6 +256,7 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
     userId: getCurrentUserId(),
     contactPhone: conv.contactPhone,
     contactName: conv.contactName,
+    labels: conv.labels || [],
     whatsappPhoneNumberId: '',
     isServiceWindowOpen: true,
     serviceWindowStartedAt: null,
@@ -317,7 +312,6 @@ interface ChatState {
   // Conversations
   conversations: Conversation[];
   selectedConversationId: string | null;
-  labels: ChatLabel[];
   searchQuery: string;
   isLoadingConversations: boolean;
   conversationsError: string | null;
@@ -371,6 +365,7 @@ interface ChatState {
   muteConversation: (id: string) => Promise<void>;
   blockConversation: (id: string) => Promise<void>;
   updateConversationName: (id: string, contactName: string) => Promise<void>;
+  updateConversationLabels: (id: string, labels: string[]) => Promise<void>;
   clearConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   toggleMessagePinned: (conversationId: string, messageId: string) => Promise<void>;
@@ -397,7 +392,6 @@ export const useChatStore = create<ChatState>()(
       // Initial state
       conversations: [],
       selectedConversationId: null,
-      labels: mockLabels,
       searchQuery: '',
       isLoadingConversations: false,
       conversationsError: null,
@@ -537,6 +531,7 @@ export const useChatStore = create<ChatState>()(
                     ? {
                         ...conversation,
                         contactName: response.data.conversation.contactName,
+                        labels: response.data.conversation.labels || [],
                         isBlocked: response.data.conversation.isBlocked,
                         isServiceWindowOpen: response.data.conversation.isServiceWindowOpen,
                         serviceWindowStartedAt: response.data.conversation.serviceWindowStartedAt
@@ -645,6 +640,7 @@ export const useChatStore = create<ChatState>()(
               userId: getCurrentUserId(),
               contactPhone: participantPhone,
               contactName: contactName || null,
+              labels: [],
               whatsappPhoneNumberId: '',
               isServiceWindowOpen: true,
               serviceWindowStartedAt: new Date(),
@@ -917,6 +913,28 @@ export const useChatStore = create<ChatState>()(
           throw error;
         }
       },
+
+      updateConversationLabels: async (id, labelIds) => {
+        try {
+          const response = await apiUpdateConversationLabels(id, labelIds);
+          if (!response.success || !response.data) {
+            throw new Error(response.message || 'Failed to update conversation labels');
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((conversation) =>
+              conversation.id === id
+                ? { ...conversation, labels: response.data?.assignedLabels || [] }
+                : conversation
+            ),
+          }));
+        } catch (error) {
+          set({
+            conversationsError: error instanceof Error ? error.message : 'Failed to update conversation labels',
+          });
+          throw error;
+        }
+      },
       
       clearConversation: async (id) => {
         const response = await apiClearConversation(id);
@@ -1099,6 +1117,7 @@ export const useChatStore = create<ChatState>()(
                 lastMessageDirection: normalizedMessage.direction,
                 unreadCount: normalizedMessage.direction === 'inbound' ? 1 : 0,
                 totalMessages: newMap.get(conversationKey)?.length || 1,
+                labels: [],
                 isPinned: false,
                 isArchived: false,
                 isMuted: false,

@@ -11,6 +11,7 @@ import type {
   StarredMessagesResponse,
   ConversationMediaResponse,
   ConversationTargetListResponse,
+  ConversationLabelsResponse,
   SendMessageRequest,
   SendMessageResponse,
   StartConversationRequest,
@@ -323,6 +324,29 @@ export async function toggleMessageStarred(
   return response.json();
 }
 
+export async function fetchConversationLabels(
+  conversationId: string | number
+): Promise<ConversationLabelsResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/labels`, {
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+export async function updateConversationLabels(
+  conversationId: string | number,
+  labelIds: string[]
+): Promise<ConversationLabelsResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/labels`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ labelIds }),
+  });
+
+  return response.json();
+}
+
 /**
  * Clear conversation messages but keep the conversation
  */
@@ -425,6 +449,8 @@ export const api = {
     toggleArchive,
     togglePin,
     updateConversationName,
+    fetchConversationLabels,
+    updateConversationLabels,
     toggleMessagePinned,
     toggleMessageStarred,
     clear: clearConversation,

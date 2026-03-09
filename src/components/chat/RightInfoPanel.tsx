@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
+import { ConversationLabelsDialog } from '@/components/chat/ConversationLabelsDialog';
 import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
 import { StarredMessagesDialog } from '@/components/chat/StarredMessagesDialog';
 import { useChatStore } from '@/stores/chatStore';
@@ -26,18 +27,18 @@ import {
   Image as ImageIcon,
   PencilLine,
 } from 'lucide-react';
-import type { Conversation } from '@/lib/types/chat';
 
 interface RightInfoPanelProps {
   conversationId: string;
 }
 
 export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
-  const { conversations, labels, muteConversation, blockConversation, updateConversationName } = useChatStore();
+  const { conversations, muteConversation, blockConversation, updateConversationName } = useChatStore();
   const conversation = conversations.find(c => c.id === conversationId);
   const [dangerAction, setDangerAction] = useState<'clear' | 'delete' | null>(null);
   const [isStarredDialogOpen, setIsStarredDialogOpen] = useState(false);
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
+  const [isLabelsDialogOpen, setIsLabelsDialogOpen] = useState(false);
   const [isUpdatingBlock, setIsUpdatingBlock] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -54,7 +55,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   }
   
   const { participant } = conversation;
-  const conversationLabels = (conversation as Conversation & { labels?: string[] }).labels || [];
+  const conversationLabels = conversation.labels || [];
   const participantPhone = formatChatPhoneNumber(participant?.phone || conversation.contactPhone);
   const rawParticipantName = conversation.contactName?.trim() || participant?.name?.trim() || '';
   const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
@@ -184,17 +185,16 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
             <div className="p-4">
               <h3 className="text-sm font-medium mb-2">Labels</h3>
               <div className="flex flex-wrap gap-2">
-                {conversationLabels.map((labelId, index) => {
-                  const label = labels.find(l => l.id === labelId || l.name === labelId);
-                  return label ? (
-                    <Badge key={label.id || index} variant="outline" className="gap-1">
+                {conversationLabels.map((label) => {
+                  return (
+                    <Badge key={label.id} variant="outline" className="gap-1">
                       <span
                         className="w-2 h-2 rounded-full"
                         style={{ backgroundColor: label.color }}
                       />
                       {label.name}
                     </Badge>
-                  ) : null;
+                  );
                 })}
               </div>
             </div>
@@ -253,7 +253,12 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         
         {/* Quick Links */}
         <div className="p-4 space-y-3">
-          <QuickLink icon={Tag} label="Labels" />
+          <QuickLink
+            icon={Tag}
+            label="Labels"
+            count={conversationLabels.length}
+            onClick={() => setIsLabelsDialogOpen(true)}
+          />
         </div>
         
         <Separator />
@@ -321,6 +326,13 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         conversationId={conversation.id}
         conversationName={participantName}
       />
+
+      <ConversationLabelsDialog
+        open={isLabelsDialogOpen}
+        onOpenChange={setIsLabelsDialogOpen}
+        conversationId={conversation.id}
+        conversationName={participantName}
+      />
     </div>
   );
 }
@@ -350,11 +362,16 @@ interface QuickLinkProps {
   icon: React.ElementType;
   label: string;
   count?: number;
+  onClick?: () => void;
 }
 
-function QuickLink({ icon: Icon, label, count }: QuickLinkProps) {
+function QuickLink({ icon: Icon, label, count, onClick }: QuickLinkProps) {
   return (
-    <button className="mx-[-0.5rem] flex w-full items-center justify-between rounded-lg p-2 text-left hover:bg-accent/80">
+    <button
+      className="mx-[-0.5rem] flex w-full items-center justify-between rounded-lg p-2 text-left hover:bg-accent/80"
+      onClick={onClick}
+      type="button"
+    >
       <div className="flex items-center gap-3">
         <Icon className="h-5 w-5 text-muted-foreground" />
         <span className="text-sm">{label}</span>

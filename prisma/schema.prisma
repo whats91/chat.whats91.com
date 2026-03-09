@@ -125,6 +125,22 @@ model CloudApiReport {
   @@map("cloud_api_reports")
 }
 
+model ChatLabel {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  uid        String   @unique @db.VarChar(255)
+  userId     BigInt   @map("user_id") @db.UnsignedBigInt
+  phoneNumber String  @map("phone_number") @db.VarChar(32)
+  labelName  String   @map("label_name") @db.VarChar(120)
+  colorCode  String   @default("#2A7B6E") @map("color_code") @db.VarChar(7)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  @@unique([userId, phoneNumber, labelName], map: "uniq_chat_labels_user_phone_label")
+  @@index([userId], map: "idx_chat_labels_user_id")
+  @@index([phoneNumber], map: "idx_chat_labels_phone_number")
+  @@map("chat_labels")
+}
+
 // ========================================
 // CONVERSATION MODEL
 // ========================================

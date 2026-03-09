@@ -84,6 +84,14 @@ export interface ConversationMessageHistory {
   updatedAt: Date;
 }
 
+export interface ConversationLabel {
+  id: number;
+  conversationId: number;
+  labelId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 function parseDatabaseName(url: string): string {
   try {
     const parsed = new URL(url);
