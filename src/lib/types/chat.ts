@@ -86,6 +86,7 @@ export interface Message {
     mimeType?: string;
     duration?: number;
     thumbnail?: string;
+    sortTimestamp?: string | Date;
   };
 }
 

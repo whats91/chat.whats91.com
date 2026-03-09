@@ -115,6 +115,26 @@ function normalizeMessageDates(message: Message): Message {
   };
 }
 
+function getMessageSortTime(message: Message): number {
+  const metadataSortTimestamp = message.metadata?.sortTimestamp;
+  const sortDate =
+    metadataSortTimestamp instanceof Date
+      ? metadataSortTimestamp
+      : metadataSortTimestamp
+        ? new Date(metadataSortTimestamp)
+        : message.timestamp instanceof Date
+          ? message.timestamp
+          : new Date(message.timestamp);
+
+  const sortTime = sortDate.getTime();
+  if (Number.isFinite(sortTime)) {
+    return sortTime;
+  }
+
+  const fallbackDate = message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp);
+  return fallbackDate.getTime();
+}
+
 function getConversationMessagePreview(message: Message): string {
   const resolved = resolveMessageForRendering(message);
 
@@ -130,9 +150,8 @@ function getConversationMessagePreview(message: Message): string {
 function compareMessageTimeline(left: Message, right: Message): number {
   const leftId = Number(left.id);
   const rightId = Number(right.id);
-  const leftTimestamp = left.timestamp instanceof Date ? left.timestamp.getTime() : new Date(left.timestamp).getTime();
-  const rightTimestamp =
-    right.timestamp instanceof Date ? right.timestamp.getTime() : new Date(right.timestamp).getTime();
+  const leftTimestamp = getMessageSortTime(left);
+  const rightTimestamp = getMessageSortTime(right);
 
   if (Number.isFinite(leftTimestamp) && Number.isFinite(rightTimestamp)) {
     const timestampDiff = leftTimestamp - rightTimestamp;

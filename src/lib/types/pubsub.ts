@@ -64,6 +64,7 @@ export interface LegacyPubSubStatusPayload {
 export interface LegacyPubSubMessagePayload {
   type: string;
   messageId?: string;
+  timestamp?: string | number;
   from?: string;
   to?: string;
   direction?: 'inbound' | 'outbound';

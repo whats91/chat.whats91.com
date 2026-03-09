@@ -77,48 +77,70 @@ function parsePubSubTimestamp(
   ...candidates: Array<string | number | Date | null | undefined>
 ): Date {
   for (const candidate of candidates) {
-    if (candidate instanceof Date) {
-      if (Number.isFinite(candidate.getTime())) {
-        return candidate;
-      }
-      continue;
-    }
-
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
-      const epochMilliseconds = candidate > 1e12 ? candidate : candidate * 1000;
-      const parsed = new Date(epochMilliseconds);
-      if (Number.isFinite(parsed.getTime())) {
-        return parsed;
-      }
-      continue;
-    }
-
-    if (typeof candidate === 'string') {
-      const trimmed = candidate.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      if (/^\d+$/.test(trimmed)) {
-        const numericValue = Number(trimmed);
-        if (Number.isFinite(numericValue)) {
-          const epochMilliseconds = trimmed.length >= 13 ? numericValue : numericValue * 1000;
-          const parsed = new Date(epochMilliseconds);
-          if (Number.isFinite(parsed.getTime())) {
-            return parsed;
-          }
-        }
-      }
-
-      const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
-      const parsed = new Date(normalized);
-      if (Number.isFinite(parsed.getTime())) {
-        return parsed;
-      }
+    const parsed = parsePubSubTimestampCandidate(candidate);
+    if (parsed) {
+      return parsed;
     }
   }
 
   return new Date();
+}
+
+function parsePubSubTimestampCandidate(
+  candidate: string | number | Date | null | undefined
+): Date | null {
+  if (candidate instanceof Date) {
+    return Number.isFinite(candidate.getTime()) ? candidate : null;
+  }
+
+  if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+    const epochMilliseconds = candidate > 1e12 ? candidate : candidate * 1000;
+    const parsed = new Date(epochMilliseconds);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  if (typeof candidate === 'string') {
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      const numericValue = Number(trimmed);
+      if (Number.isFinite(numericValue)) {
+        const epochMilliseconds = trimmed.length >= 13 ? numericValue : numericValue * 1000;
+        const parsed = new Date(epochMilliseconds);
+        if (Number.isFinite(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+
+    const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+    const parsed = new Date(normalized);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  return null;
+}
+
+function parseLatestPubSubTimestamp(
+  ...candidates: Array<string | number | Date | null | undefined>
+): Date {
+  let latestTimestamp: Date | null = null;
+
+  for (const candidate of candidates) {
+    const parsed = parsePubSubTimestampCandidate(candidate);
+    if (!parsed) {
+      continue;
+    }
+
+    if (!latestTimestamp || parsed.getTime() > latestTimestamp.getTime()) {
+      latestTimestamp = parsed;
+    }
+  }
+
+  return latestTimestamp || new Date();
 }
 
 function isLegacyStatusPayload(
@@ -144,6 +166,7 @@ function mapPubSubMessageToChatMessage(event: PubSubNewMessageEvent): Message {
   const userId = getCurrentUserId();
   const { conversation, messageRecord } = event.data;
   const contactPhone = conversation.contactPhone;
+  const sortTimestamp = parseLatestPubSubTimestamp(event.timestamp, messageRecord.timestamp);
 
   return {
     id: String(messageRecord.id),
@@ -166,6 +189,9 @@ function mapPubSubMessageToChatMessage(event: PubSubNewMessageEvent): Message {
     isRead: messageRecord.direction === 'outbound',
     isPinned: Boolean(messageRecord.isPinned),
     isStarred: Boolean(messageRecord.isStarred),
+    metadata: {
+      sortTimestamp: sortTimestamp.toISOString(),
+    },
   };
 }
 
@@ -194,6 +220,12 @@ function mapLegacyPubSubPayloadToChatMessage(
     (direction === 'outbound'
       ? normalizePayloadObject(payload.content?.payload)
       : null);
+  const sortTimestamp = parseLatestPubSubTimestamp(
+    payload.processedAt,
+    payload.conversation?.lastMessageAt,
+    payload.messageRecord?.timestamp,
+    payload.timestamp
+  );
 
   return {
     id: String(messageId),
@@ -223,6 +255,7 @@ function mapLegacyPubSubPayloadToChatMessage(
       (direction === 'outbound' ? 'sent' : 'delivered')) as Message['status'],
     timestamp: parsePubSubTimestamp(
       payload.messageRecord?.timestamp,
+      payload.timestamp,
       payload.processedAt
     ),
     mediaUrl: ensureHttps(media?.url || null),
@@ -239,6 +272,9 @@ function mapLegacyPubSubPayloadToChatMessage(
     isRead: direction === 'outbound',
     isPinned: false,
     isStarred: false,
+    metadata: {
+      sortTimestamp: sortTimestamp.toISOString(),
+    },
   };
 }
 

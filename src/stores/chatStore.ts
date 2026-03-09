@@ -73,8 +73,16 @@ function toMessageDate(value: Message['timestamp'] | string | number): Date {
   return parseTimestampCandidate(value) || new Date();
 }
 
+function getMessageSortDate(message: Message): Date {
+  return (
+    parseTimestampCandidate(message.metadata?.sortTimestamp) ||
+    parseTimestampCandidate(message.timestamp) ||
+    new Date()
+  );
+}
+
 function compareMessages(left: Message, right: Message): number {
-  const timestampDiff = toMessageDate(left.timestamp).getTime() - toMessageDate(right.timestamp).getTime();
+  const timestampDiff = getMessageSortDate(left).getTime() - getMessageSortDate(right).getTime();
   if (timestampDiff !== 0) {
     return timestampDiff;
   }
