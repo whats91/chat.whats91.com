@@ -305,12 +305,21 @@ function mapTemplateRow(row: CloudWhatsappTemplateRow): WhatsAppTemplateDefiniti
   };
 }
 
-function normalizePhoneNumberValue(phoneNumber: string | null | undefined): string | null {
-  if (!phoneNumber) {
+function normalizePhoneNumberValue(phoneNumber: unknown): string | null {
+  if (phoneNumber === null || phoneNumber === undefined) {
     return null;
   }
 
-  const digits = phoneNumber.replace(/\D/g, '');
+  const normalizedValue =
+    typeof phoneNumber === 'string' || typeof phoneNumber === 'number' || typeof phoneNumber === 'bigint'
+      ? String(phoneNumber)
+      : null;
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const digits = normalizedValue.replace(/\D/g, '');
   return digits || null;
 }
 
