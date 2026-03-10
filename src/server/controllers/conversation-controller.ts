@@ -58,6 +58,7 @@ import { buildExcelWorkbookBuffer } from '@/server/export/chat-excel';
 
 const log = new Logger('ConversationCtrl');
 const SERVICE_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const exportTimestampFormatter = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
   year: 'numeric',
@@ -173,6 +174,89 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
 
 function getStringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function buildDateFromIstWallClockParts(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  millisecond = 0
+): Date {
+  return new Date(
+    Date.UTC(year, month - 1, day, hour, minute, second, millisecond) - IST_OFFSET_MS
+  );
+}
+
+function parseConversationDbDateString(value: string): Date | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const numericValue = Number(trimmed);
+    if (!Number.isFinite(numericValue)) {
+      return null;
+    }
+
+    const epochMilliseconds = trimmed.length >= 13 ? numericValue : numericValue * 1000;
+    const parsed = new Date(epochMilliseconds);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  const match = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/
+  );
+
+  if (match) {
+    const [, year, month, day, hour, minute, second = '0', millisecond = '0'] = match;
+    return buildDateFromIstWallClockParts(
+      Number(year),
+      Number(month),
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      Number(millisecond.padEnd(3, '0'))
+    );
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function normalizeConversationDbDate(
+  value: Date | string | null | undefined
+): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      return null;
+    }
+
+    return buildDateFromIstWallClockParts(
+      value.getUTCFullYear(),
+      value.getUTCMonth() + 1,
+      value.getUTCDate(),
+      value.getUTCHours(),
+      value.getUTCMinutes(),
+      value.getUTCSeconds(),
+      value.getUTCMilliseconds()
+    );
+  }
+
+  return parseConversationDbDateString(value);
 }
 
 function parseHistoryTimestamp(value: unknown): Date | null {
@@ -917,9 +1001,9 @@ async function getConversationServiceWindowState(
     [conversationId, userId]
   );
 
-  const lastInboundMessageAt = lastInboundMessage?.lastInboundMessageAt
-    ? new Date(lastInboundMessage.lastInboundMessageAt)
-    : null;
+  const lastInboundMessageAt = normalizeConversationDbDate(
+    lastInboundMessage?.lastInboundMessageAt || null
+  );
   const expiresAt = lastInboundMessageAt
     ? new Date(lastInboundMessageAt.getTime() + SERVICE_WINDOW_DURATION_MS)
     : null;
@@ -933,6 +1017,11 @@ async function getConversationServiceWindowState(
 }
 
 function mapConversationMessageRowToMessage(msg: any): Message {
+  const messageTimestampSource =
+    msg.direction === 'inbound'
+      ? msg.created_at || msg.timestamp
+      : msg.timestamp || msg.created_at;
+
   return {
     id: String(msg.id),
     conversationId: String(msg.conversation_id),
@@ -944,7 +1033,7 @@ function mapConversationMessageRowToMessage(msg: any): Message {
     type: msg.message_type,
     content: msg.message_content,
     status: msg.status,
-    timestamp: msg.timestamp,
+    timestamp: normalizeConversationDbDate(messageTimestampSource) || new Date(),
     replyTo: msg.replied_to_message_id,
     mediaUrl: msg.media_url,
     mediaMimeType: msg.media_mime_type,
@@ -960,7 +1049,7 @@ function mapConversationMessageRowToMessage(msg: any): Message {
     isRead: msg.is_read || false,
     isPinned: msg.is_pinned || false,
     isStarred: msg.is_starred || false,
-    readAt: msg.read_at,
+    readAt: normalizeConversationDbDate(msg.read_at) || null,
   };
 }
 
@@ -1150,7 +1239,7 @@ export async function getConversations({
     // Format response
     const formattedConversations: ConversationListItem[] = conversations.map(conv => {
       const serviceWindowStartedAt = conv.service_window_started_at
-        ? new Date(conv.service_window_started_at)
+        ? normalizeConversationDbDate(conv.service_window_started_at)
         : null;
       const serviceWindowExpiresAt = serviceWindowStartedAt
         ? new Date(serviceWindowStartedAt.getTime() + SERVICE_WINDOW_DURATION_MS)
@@ -1172,9 +1261,9 @@ export async function getConversations({
           : null,
         lastMessageType: conv.last_message_type,
         lastMessageDirection: conv.last_message_direction,
-        lastMessageAt: conv.last_message_at,
-        updatedAt: conv.updated_at,
-        lastMessageTimeAgo: formatTimeAgo(conv.last_message_at),
+        lastMessageAt: normalizeConversationDbDate(conv.last_message_at),
+        updatedAt: normalizeConversationDbDate(conv.updated_at),
+        lastMessageTimeAgo: formatTimeAgo(normalizeConversationDbDate(conv.last_message_at)),
         unreadCount: toSafeNumber(conv.unread_count),
         isPinned: conv.is_pinned || false,
         isArchived: conv.is_archived || false,
@@ -3466,8 +3555,8 @@ export async function getMessageInfo(conversationId: number, messageId: number, 
 
     const timeline = buildMessageHistoryTimeline(
       historyRows,
-      message.timestamp || message.created_at || null,
-      message.read_at || null,
+      normalizeConversationDbDate(message.direction === 'inbound' ? (message.created_at || message.timestamp) : (message.timestamp || message.created_at)),
+      normalizeConversationDbDate(message.read_at || null),
       message.error_message || null
     );
 
