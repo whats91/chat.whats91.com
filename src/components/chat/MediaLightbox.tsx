@@ -34,10 +34,25 @@ export function MediaLightbox({
 }: MediaLightboxProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const resolved = useMemo(() => (message ? resolveMessageForRendering(message) : null), [message]);
+  const previewType = useMemo(() => {
+    if (!resolved) {
+      return null;
+    }
+
+    if (resolved.type !== 'template') {
+      return resolved.type;
+    }
+
+    const templateHeaderType = String(resolved.interactiveData?.template_header_type || '').toLowerCase();
+    return templateHeaderType === 'image' || templateHeaderType === 'video'
+      ? templateHeaderType
+      : resolved.type;
+  }, [resolved]);
 
   const canRender =
     resolved &&
-    ['image', 'video', 'sticker'].includes(resolved.type) &&
+    previewType !== null &&
+    ['image', 'video', 'sticker'].includes(previewType) &&
     isRenderableMediaUrl(resolved.mediaUrl);
   const canForward = resolved && ['image', 'video', 'sticker'].includes(resolved.type);
   const caption = resolved?.mediaCaption || (resolved?.content && !/^\[[^\]]+\]$/.test(resolved.content) ? resolved.content : null);
@@ -62,7 +77,7 @@ export function MediaLightbox({
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = buildDownloadFilename(message, resolved.type);
+      link.download = buildDownloadFilename(message, previewType || resolved.type);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -150,7 +165,7 @@ export function MediaLightbox({
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-24">
             {canRender && resolved ? (
               <div className="mx-auto flex w-full items-center justify-center">
-                {resolved.type === 'video' ? (
+                {previewType === 'video' ? (
                   <video
                     src={resolved.mediaUrl!}
                     controls
@@ -160,10 +175,10 @@ export function MediaLightbox({
                 ) : (
                   <img
                     src={resolved.mediaUrl!}
-                    alt={caption || resolved.type}
+                    alt={caption || previewType || resolved.type}
                     className={cn(
                       'mx-auto max-h-[82vh] max-w-[92vw] rounded-lg bg-black/20 object-contain',
-                      resolved.type === 'sticker' && 'p-4'
+                      previewType === 'sticker' && 'p-4'
                     )}
                   />
                 )}

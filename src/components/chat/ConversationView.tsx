@@ -472,56 +472,57 @@ export function ConversationView({
   }
   
   return (
-    <div ref={conversationRootRef} className="chat-canvas flex h-full flex-col bg-background">
-      {/* Header */}
-      <ConversationHeader
-        conversation={conversation}
-        onBack={onBack}
-        showBackButton={showBackButton}
-        onSearchClick={() => setIsSearchOpen((current) => !current)}
-        isSearchOpen={isSearchOpen}
-        onViewMedia={() => setIsMediaDialogOpen(true)}
-        onInfoClick={() => toggleRightPanel()}
-        isInfoOpen={isRightPanelOpen}
-        onMuteToggle={() => {
-          void muteConversation(conversation.id);
-        }}
-        onArchiveToggle={() => {
-          void archiveConversation(conversation.id);
-        }}
-        onPinToggle={() => {
-          void pinConversation(conversation.id);
-        }}
-        onBlockToggle={() => {
-          void blockConversation(conversation.id);
-        }}
-        onExportConversation={() => {
-          void handleExportConversation();
-        }}
-        isExportingConversation={isExportingConversation}
-        onClearChat={() => setDangerAction('clear')}
-        onDeleteConversation={() => setDangerAction('delete')}
-      />
-
-      {isSearchOpen ? (
-        <ConversationSearchBar
-          query={searchQuery}
-          onQueryChange={setSearchQuery}
-          activeMatchIndex={activeSearchMatchIndex}
-          totalMatches={searchMatches.length}
-          onNavigateUp={() => navigateSearch('up')}
-          onNavigateDown={() => navigateSearch('down')}
-          onClose={() => setIsSearchOpen(false)}
+    <div ref={conversationRootRef} className="chat-canvas flex h-full min-h-0 flex-col overflow-hidden bg-background">
+      <div className="sticky top-0 z-30 shrink-0">
+        <ConversationHeader
+          conversation={conversation}
+          onBack={onBack}
+          showBackButton={showBackButton}
+          onSearchClick={() => setIsSearchOpen((current) => !current)}
+          isSearchOpen={isSearchOpen}
+          onViewMedia={() => setIsMediaDialogOpen(true)}
+          onInfoClick={() => toggleRightPanel()}
+          isInfoOpen={isRightPanelOpen}
+          onMuteToggle={() => {
+            void muteConversation(conversation.id);
+          }}
+          onArchiveToggle={() => {
+            void archiveConversation(conversation.id);
+          }}
+          onPinToggle={() => {
+            void pinConversation(conversation.id);
+          }}
+          onBlockToggle={() => {
+            void blockConversation(conversation.id);
+          }}
+          onExportConversation={() => {
+            void handleExportConversation();
+          }}
+          isExportingConversation={isExportingConversation}
+          onClearChat={() => setDangerAction('clear')}
+          onDeleteConversation={() => setDangerAction('delete')}
         />
-      ) : null}
 
-      {pinnedMessage ? (
-        <PinnedMessageBanner
-          message={pinnedMessage}
-          isLoaded={isPinnedMessageLoaded}
-          onClick={() => scrollToMessage(pinnedMessage.id)}
-        />
-      ) : null}
+        {isSearchOpen ? (
+          <ConversationSearchBar
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            activeMatchIndex={activeSearchMatchIndex}
+            totalMatches={searchMatches.length}
+            onNavigateUp={() => navigateSearch('up')}
+            onNavigateDown={() => navigateSearch('down')}
+            onClose={() => setIsSearchOpen(false)}
+          />
+        ) : null}
+
+        {pinnedMessage ? (
+          <PinnedMessageBanner
+            message={pinnedMessage}
+            isLoaded={isPinnedMessageLoaded}
+            onClick={() => scrollToMessage(pinnedMessage.id)}
+          />
+        ) : null}
+      </div>
       
       {/* Messages - wrapper div with overflow-hidden is critical for ScrollArea */}
       <div className="flex-1 min-h-0 overflow-hidden">
