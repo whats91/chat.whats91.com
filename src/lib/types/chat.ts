@@ -208,6 +208,9 @@ export interface ConversationListItem {
   contactPhone: string;
   contactName: string | null;
   profileImageUrl: string | null;
+  isServiceWindowOpen: boolean;
+  serviceWindowStartedAt: Date | null;
+  serviceWindowExpiresAt: Date | null;
   displayName: string;
   lastMessageContent: string | null;
   lastMessageType: string | null;

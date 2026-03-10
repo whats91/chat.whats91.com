@@ -1049,6 +1049,12 @@ export async function getConversations({
         c.last_message_id, c.last_message_content, c.last_message_type,
         c.last_message_at, c.last_message_direction, c.unread_count,
         c.total_messages, c.is_archived, c.is_pinned, c.is_muted, c.is_blocked, c.status,
+        (
+          SELECT MAX(COALESCE(cm.created_at, cm.timestamp))
+          FROM conversation_messages cm
+          WHERE cm.conversation_id = c.id
+            AND cm.direction = 'inbound'
+        ) AS service_window_started_at,
         c.created_at, c.updated_at
       FROM conversations c
       WHERE c.user_id = ?
@@ -1142,28 +1148,42 @@ export async function getConversations({
     const totalItems = toSafeNumber(countResult?.total);
     
     // Format response
-    const formattedConversations: ConversationListItem[] = conversations.map(conv => ({
-      id: conv.id,
-      contactPhone: conv.contact_phone,
-      contactName: conv.contact_name,
-      profileImageUrl: buildConversationProfileImageUrl(conv.id, conv.profile_image_wasabi_path),
-      displayName: getDisplayName(conv.contact_name, conv.contact_phone),
-      lastMessageContent: conv.last_message_content 
-        ? getPreviewText(conv.last_message_type, conv.last_message_content)
-        : null,
-      lastMessageType: conv.last_message_type,
-      lastMessageDirection: conv.last_message_direction,
-      lastMessageAt: conv.last_message_at,
-      updatedAt: conv.updated_at,
-      lastMessageTimeAgo: formatTimeAgo(conv.last_message_at),
-      unreadCount: toSafeNumber(conv.unread_count),
-      isPinned: conv.is_pinned || false,
-      isArchived: conv.is_archived || false,
-      isMuted: conv.is_muted || false,
-      isBlocked: conv.is_blocked || false,
-      status: conv.status,
-      labels: labelsByConversation.get(String(conv.id)) || [],
-    }));
+    const formattedConversations: ConversationListItem[] = conversations.map(conv => {
+      const serviceWindowStartedAt = conv.service_window_started_at
+        ? new Date(conv.service_window_started_at)
+        : null;
+      const serviceWindowExpiresAt = serviceWindowStartedAt
+        ? new Date(serviceWindowStartedAt.getTime() + SERVICE_WINDOW_DURATION_MS)
+        : null;
+
+      return {
+        id: conv.id,
+        contactPhone: conv.contact_phone,
+        contactName: conv.contact_name,
+        profileImageUrl: buildConversationProfileImageUrl(conv.id, conv.profile_image_wasabi_path),
+        isServiceWindowOpen: Boolean(
+          serviceWindowExpiresAt && serviceWindowExpiresAt.getTime() > Date.now()
+        ),
+        serviceWindowStartedAt,
+        serviceWindowExpiresAt,
+        displayName: getDisplayName(conv.contact_name, conv.contact_phone),
+        lastMessageContent: conv.last_message_content 
+          ? getPreviewText(conv.last_message_type, conv.last_message_content)
+          : null,
+        lastMessageType: conv.last_message_type,
+        lastMessageDirection: conv.last_message_direction,
+        lastMessageAt: conv.last_message_at,
+        updatedAt: conv.updated_at,
+        lastMessageTimeAgo: formatTimeAgo(conv.last_message_at),
+        unreadCount: toSafeNumber(conv.unread_count),
+        isPinned: conv.is_pinned || false,
+        isArchived: conv.is_archived || false,
+        isMuted: conv.is_muted || false,
+        isBlocked: conv.is_blocked || false,
+        status: conv.status,
+        labels: labelsByConversation.get(String(conv.id)) || [],
+      };
+    });
     
     // Get unread count summary
     const [unreadResult] = await queryConversationsDb<any>(

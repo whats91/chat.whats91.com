@@ -274,6 +274,13 @@ function mapConversationListItemToConversation(
   conv: Awaited<ReturnType<typeof fetchConversations>>['data']['conversations'][number],
   existingConversation?: Conversation | null
 ): Conversation {
+  const serviceWindowStartedAt = conv.serviceWindowStartedAt
+    ? new Date(conv.serviceWindowStartedAt)
+    : existingConversation?.serviceWindowStartedAt ?? null;
+  const serviceWindowExpiresAt = conv.serviceWindowExpiresAt
+    ? new Date(conv.serviceWindowExpiresAt)
+    : existingConversation?.serviceWindowExpiresAt ?? null;
+
   return {
     id: String(conv.id),
     userId: existingConversation?.userId || getCurrentUserId(),
@@ -283,9 +290,9 @@ function mapConversationListItemToConversation(
     profileImageUrl: conv.profileImageUrl,
     labels: conv.labels || [],
     whatsappPhoneNumberId: existingConversation?.whatsappPhoneNumberId || '',
-    isServiceWindowOpen: existingConversation?.isServiceWindowOpen ?? true,
-    serviceWindowStartedAt: existingConversation?.serviceWindowStartedAt ?? null,
-    serviceWindowExpiresAt: existingConversation?.serviceWindowExpiresAt ?? null,
+    isServiceWindowOpen: conv.isServiceWindowOpen ?? existingConversation?.isServiceWindowOpen ?? false,
+    serviceWindowStartedAt,
+    serviceWindowExpiresAt,
     lastMessageId: conv.lastMessageContent ? `last-${conv.id}` : null,
     lastMessageContent: conv.lastMessageContent,
     lastMessageType: (conv.lastMessageType || 'text') as Message['type'],
