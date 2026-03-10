@@ -38,6 +38,7 @@ import { getApprovedTemplateForSend, getApprovedTemplatesByUserAndPhoneNumber } 
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
 import { buildConversationMediaProxyUrl, MEDIA_MESSAGE_TYPES } from '@/lib/media/conversation-media';
 import { db } from '@/lib/db';
+import { resolveMessageStatusDetails } from '@/lib/whatsapp/message-status';
 import {
   cleanupPendingConversationMediaUpload,
   resolveForwardableConversationMedia,
@@ -290,11 +291,22 @@ function extractLatestMessageHistoryStatus(
 
   const errors = Array.isArray(parsedPayload.errors) ? parsedPayload.errors : [];
   const firstError = errors.find((entry) => isObject(entry));
-  const errorMessage = getStringValue(firstError?.message) || null;
+  const resolvedStatus = resolveMessageStatusDetails({
+    status: rawStatus,
+    errorCode:
+      typeof firstError?.code === 'number' || typeof firstError?.code === 'string'
+        ? firstError.code
+        : null,
+  });
+  const mappedStatus = mapConversationMessageStatus(resolvedStatus.key);
+  const errorMessage =
+    mappedStatus === 'failed'
+      ? resolvedStatus.label
+      : getStringValue(firstError?.message) || null;
 
   return {
-    status: mapConversationMessageStatus(rawStatus),
-    rawStatus,
+    status: mappedStatus,
+    rawStatus: resolvedStatus.key,
     errorMessage,
     timestamp: parseHistoryTimestamp(parsedPayload.timestamp),
     historyId,
@@ -3533,13 +3545,22 @@ export async function updateMessageStatus(
       return { success: true };
     }
 
+    const resolvedStatus = resolveMessageStatusDetails({
+      status,
+      errorCode: errorCode || null,
+    });
+    const nextStatus = mapConversationMessageStatus(resolvedStatus.key);
+    const resolvedErrorMessage =
+      nextStatus === 'failed'
+        ? resolvedStatus.label
+        : errorMessage || null;
     const currentStatus = mapConversationMessageStatus(String(message.status || 'pending'));
-    const shouldApply = shouldApplyMessageStatusUpdate(currentStatus, status);
+    const shouldApply = shouldApplyMessageStatusUpdate(currentStatus, nextStatus);
 
     if (shouldApply) {
       await executeConversationsDb(
         `UPDATE conversation_messages SET status = ?, error_message = ?, updated_at = datetime('now') WHERE whatsapp_message_id = ?`,
-        [status, errorMessage || null, whatsappMessageId]
+        [nextStatus, resolvedErrorMessage, whatsappMessageId]
       );
     }
     
@@ -3547,9 +3568,9 @@ export async function updateMessageStatus(
       await publishStatusUpdate(message.user_id, {
         messageId: whatsappMessageId,
         conversationId: message.conversation_id,
-        status,
+        status: nextStatus,
         errorCode,
-        errorMessage,
+        errorMessage: resolvedErrorMessage || undefined,
       });
     }
     
