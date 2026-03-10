@@ -264,116 +264,118 @@ export function TemplatePickerDialog({
   };
 
   const renderSelectStep = () => (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <div className="text-sm font-medium">Choose template</div>
-        <Popover open={isTemplateSearchOpen} onOpenChange={setIsTemplateSearchOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              role="combobox"
-              aria-expanded={isTemplateSearchOpen}
-              className="h-auto w-full justify-between px-3 py-3 text-left"
-              disabled={isLoading || templates.length === 0}
-            >
-              <div className="min-w-0">
-                {selectedTemplate ? (
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{selectedTemplate.templateName}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {selectedTemplate.category} · {selectedTemplate.language} · v{selectedTemplate.version}
-                    </div>
-                  </div>
-                ) : (
-                  <span className="text-sm text-muted-foreground">Search and select a template</span>
-                )}
-              </div>
-              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-[min(32rem,calc(100vw-2rem))] p-0" align="start">
-            <Command>
-              <CommandInput placeholder="Search templates..." />
-              <CommandList>
-                <CommandEmpty>No templates found.</CommandEmpty>
-                <CommandGroup>
-                  {templates.map((template) => (
-                    <CommandItem
-                      key={template.id}
-                      value={`${template.templateName} ${template.category} ${template.language}`}
-                      onSelect={() => {
-                        setSelectedTemplateId(template.id);
-                        setIsTemplateSearchOpen(false);
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          'mr-2 h-4 w-4',
-                          selectedTemplateId === template.id ? 'opacity-100' : 'opacity-0'
-                        )}
-                      />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{template.templateName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {template.category} · {template.language} · {template.header.type}
-                        </div>
+    <ScrollArea className="h-full pr-4">
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Choose template</div>
+          <Popover open={isTemplateSearchOpen} onOpenChange={setIsTemplateSearchOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                role="combobox"
+                aria-expanded={isTemplateSearchOpen}
+                className="h-auto w-full justify-between px-3 py-3 text-left"
+                disabled={isLoading || templates.length === 0}
+              >
+                <div className="min-w-0">
+                  {selectedTemplate ? (
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{selectedTemplate.templateName}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {selectedTemplate.category} · {selectedTemplate.language} · v{selectedTemplate.version}
                       </div>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Search and select a template</span>
+                  )}
+                </div>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[min(32rem,calc(100vw-2rem))] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search templates..." />
+                <CommandList>
+                  <CommandEmpty>No templates found.</CommandEmpty>
+                  <CommandGroup>
+                    {templates.map((template) => (
+                      <CommandItem
+                        key={template.id}
+                        value={`${template.templateName} ${template.category} ${template.language}`}
+                        onSelect={() => {
+                          setSelectedTemplateId(template.id);
+                          setIsTemplateSearchOpen(false);
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            selectedTemplateId === template.id ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{template.templateName}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {template.category} · {template.language} · {template.header.type}
+                          </div>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {isLoading ? (
+          <div className="rounded-xl border border-border/70 bg-card/40 px-4 py-10 text-center text-sm text-muted-foreground">
+            Loading templates...
+          </div>
+        ) : null}
+
+        {!isLoading && error ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        ) : null}
+
+        {!isLoading && !error && templates.length === 0 ? (
+          <div className="rounded-xl border border-border/70 bg-card/40 px-4 py-10 text-center text-sm text-muted-foreground">
+            No approved templates are available for this WhatsApp number.
+          </div>
+        ) : null}
+
+        {selectedTemplate ? (
+          <div className="rounded-xl border border-border/70 bg-card/40 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold">{selectedTemplate.templateName}</h3>
+              <Badge variant="secondary">{selectedTemplate.category}</Badge>
+              <Badge variant="outline">{selectedTemplate.language}</Badge>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Header</div>
+                <div className="mt-1 text-sm font-medium">{selectedTemplate.header.type}</div>
+              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Parameters</div>
+                <div className="mt-1 text-sm font-medium">{selectedTemplate.parameters.length}</div>
+              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Buttons</div>
+                <div className="mt-1 text-sm font-medium">{selectedTemplate.buttons.length}</div>
+              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Format</div>
+                <div className="mt-1 text-sm font-medium">{selectedTemplate.parameterFormat}</div>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
-
-      {isLoading ? (
-        <div className="rounded-xl border border-border/70 bg-card/40 px-4 py-10 text-center text-sm text-muted-foreground">
-          Loading templates...
-        </div>
-      ) : null}
-
-      {!isLoading && error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      ) : null}
-
-      {!isLoading && !error && templates.length === 0 ? (
-        <div className="rounded-xl border border-border/70 bg-card/40 px-4 py-10 text-center text-sm text-muted-foreground">
-          No approved templates are available for this WhatsApp number.
-        </div>
-      ) : null}
-
-      {selectedTemplate ? (
-        <div className="rounded-xl border border-border/70 bg-card/40 p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold">{selectedTemplate.templateName}</h3>
-            <Badge variant="secondary">{selectedTemplate.category}</Badge>
-            <Badge variant="outline">{selectedTemplate.language}</Badge>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Header</div>
-              <div className="mt-1 text-sm font-medium">{selectedTemplate.header.type}</div>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Parameters</div>
-              <div className="mt-1 text-sm font-medium">{selectedTemplate.parameters.length}</div>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Buttons</div>
-              <div className="mt-1 text-sm font-medium">{selectedTemplate.buttons.length}</div>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Format</div>
-              <div className="mt-1 text-sm font-medium">{selectedTemplate.parameterFormat}</div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    </ScrollArea>
   );
 
   const renderFillStep = () => (
@@ -385,7 +387,7 @@ export function TemplatePickerDialog({
       const template = selectedTemplate;
 
       return (
-        <ScrollArea className="max-h-[56vh] pr-4">
+        <ScrollArea className="h-full pr-4">
           <div className="space-y-4">
             <div className="rounded-xl border border-border/70 bg-card/40 p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -510,7 +512,7 @@ export function TemplatePickerDialog({
   );
 
   const renderPreviewStep = () => (
-    <ScrollArea className="max-h-[56vh] pr-4">
+    <ScrollArea className="h-full pr-4">
       <div className="space-y-4">
         {selectedTemplate ? (
           <div className="rounded-xl border border-border/70 bg-card/40 p-4">
@@ -571,39 +573,41 @@ export function TemplatePickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] w-[min(42rem,calc(100vw-2rem))] max-w-none flex-col overflow-hidden p-0">
+        <DialogHeader className="shrink-0 px-6 pt-6">
           <DialogTitle>Send Template Message</DialogTitle>
           <DialogDescription>
             Select a template, fill the required values, then review the final WhatsApp message before sending.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-3 gap-2">
-          {TEMPLATE_STEPS.map((step) => (
-            <div
-              key={step.id}
-              className={cn(
-                'rounded-lg border px-3 py-2 text-center text-sm font-medium',
-                currentStep === step.id
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : currentStep > step.id
-                    ? 'border-border bg-muted/30 text-foreground'
-                    : 'border-border/70 bg-card/30 text-muted-foreground'
-              )}
-            >
-              {step.label}
-            </div>
-          ))}
+        <div className="shrink-0 px-6 pt-4">
+          <div className="grid grid-cols-3 gap-2">
+            {TEMPLATE_STEPS.map((step) => (
+              <div
+                key={step.id}
+                className={cn(
+                  'rounded-lg border px-3 py-2 text-center text-sm font-medium',
+                  currentStep === step.id
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : currentStep > step.id
+                      ? 'border-border bg-muted/30 text-foreground'
+                      : 'border-border/70 bg-card/30 text-muted-foreground'
+                )}
+              >
+                {step.label}
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="min-h-[380px]">
+        <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
           {currentStep === 1 ? renderSelectStep() : null}
           {currentStep === 2 ? renderFillStep() : null}
           {currentStep === 3 ? renderPreviewStep() : null}
         </div>
 
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/70 px-6 py-4">
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

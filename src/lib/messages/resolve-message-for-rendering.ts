@@ -194,6 +194,12 @@ function extractTemplateButtons(template: JsonObject): Array<Record<string, unkn
     });
 }
 
+function extractTemplatePreviewButtons(value: unknown): Array<Record<string, unknown>> {
+  return (
+    parseArray<Record<string, unknown>>(value)?.filter((button) => isObject(button)) || []
+  );
+}
+
 function resolveBaseContent(message: Message): string {
   if (getString(message.content)) return message.content!.trim();
   if (getString(message.mediaCaption)) return message.mediaCaption!.trim();
@@ -372,18 +378,34 @@ export function resolveMessageForRendering(message: Message): RenderableMessage 
 
     case 'template': {
       const template = parseObject(payloadMessage.template) || {};
+      const templatePreview = parseObject(selectedPayload?.template_preview) || {};
+      const templatePreviewHeader = parseObject(templatePreview.header) || {};
       const templateText = extractTemplateBodyText(template);
+      const previewButtons = extractTemplatePreviewButtons(templatePreview.buttons);
+      const previewBodyText = getString(templatePreview.bodyText);
+      const previewHeaderText = getString(templatePreviewHeader.text);
+      const previewFooterText = getString(templatePreview.footerText);
       normalized.type = 'template';
+      normalized.mediaUrl =
+        getString(templatePreviewHeader.mediaUrl) || normalized.mediaUrl;
+      normalized.mediaMimeType =
+        getString(templatePreviewHeader.mediaMimeType) || normalized.mediaMimeType;
+      normalized.mediaFilename =
+        getString(templatePreviewHeader.mediaFilename) || normalized.mediaFilename;
       normalized.interactiveData = {
         type: 'template',
         template_name: getString(template.name),
         language: template.language || null,
         components: Array.isArray(template.components) ? template.components : [],
-        buttons: extractTemplateButtons(template),
+        buttons: previewButtons.length > 0 ? previewButtons : extractTemplateButtons(template),
+        template_header_type: getString(templatePreviewHeader.type),
+        template_header_text: previewHeaderText,
+        template_footer_text: previewFooterText,
       };
       normalized.content =
-        normalized.content ||
+        previewBodyText ||
         templateText ||
+        normalized.content ||
         (getString(template.name) ? `[Template: ${getString(template.name)}]` : '[Template]');
       break;
     }

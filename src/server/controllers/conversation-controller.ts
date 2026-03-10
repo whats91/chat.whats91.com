@@ -609,6 +609,71 @@ function buildTemplateTextParameters(
   }));
 }
 
+function renderTemplateText(
+  sourceText: string | null | undefined,
+  values: SendMessageRequest['templateParameters']
+): string | null {
+  if (!sourceText) {
+    return null;
+  }
+
+  let placeholderIndex = -1;
+  return sourceText.replace(/{{\s*([^}]+?)\s*}}/g, (_match, rawKey: string) => {
+    placeholderIndex += 1;
+    const parameterKey = rawKey.trim();
+    return (
+      resolveTemplateParameterValue(values, parameterKey, placeholderIndex) ||
+      `{{${parameterKey}}}`
+    );
+  });
+}
+
+function buildTemplatePreviewButtons(
+  buttons: Array<{
+    type: string;
+    index: number;
+    text: string;
+    url?: string | null;
+    phoneNumber?: string | null;
+  }>,
+  values: SendMessageRequest['templateParameters']
+): Array<Record<string, unknown>> {
+  return buttons.map((button) => ({
+    id: String(button.index),
+    title: button.text,
+    text: button.text,
+    type: button.type,
+    url: button.url ? renderTemplateText(button.url, values) : null,
+    phone_number: button.phoneNumber || null,
+  }));
+}
+
+interface StoredTemplatePreviewPayload {
+  header: {
+    type: string;
+    text: string | null;
+    mediaUrl: string | null;
+    mediaMimeType: string | null;
+    mediaFilename: string | null;
+  };
+  bodyText: string | null;
+  footerText: string | null;
+  buttons: Array<Record<string, unknown>>;
+}
+
+function getTemplateHeaderFallbackMimeType(headerType: string): string | null {
+  switch (headerType) {
+    case 'IMAGE':
+      return 'image/*';
+    case 'VIDEO':
+      return 'video/*';
+    case 'DOCUMENT':
+      return 'application/octet-stream';
+    default:
+      return null;
+  }
+}
+
 function buildTemplateButtonComponents(
   buttons: Array<{ type: string; index: number; dynamicParameterKeys: string[] }>,
   values: SendMessageRequest['templateParameters']
@@ -1699,6 +1764,11 @@ export async function sendMessage({
     let resolvedMediaMimeType: string | null = null;
     let resolvedMediaFilename: string | null = null;
     let templatePreviewText: string | null = null;
+    let storedOutgoingPayload: Record<string, unknown> | null = null;
+    let templatePreviewPayload: StoredTemplatePreviewPayload | null = null;
+    let templatePreviewMediaUrl: string | null = null;
+    let templatePreviewMediaMimeType: string | null = null;
+    let templatePreviewMediaFilename: string | null = null;
     const sendContext = await resolveConversationSendContext(conversationId, userId, {
       requireOpenServiceWindow: messageData.messageType !== 'template',
     });
@@ -1758,6 +1828,7 @@ export async function sendMessage({
       to: conversation.contact_phone,
       type: messageData.messageType,
     };
+    storedOutgoingPayload = messagePayload as Record<string, unknown>;
     
     // Add content based on message type
     switch (messageData.messageType) {
@@ -1887,6 +1958,42 @@ export async function sendMessage({
           templateDefinition.buttons,
           messageData.templateParameters
         );
+        const renderedTemplateBodyText = renderTemplateText(
+          templateDefinition.bodyText,
+          messageData.templateParameters
+        );
+        const renderedTemplateHeaderText =
+          templateDefinition.header.type === 'TEXT'
+            ? renderTemplateText(templateDefinition.header.text, messageData.templateParameters)
+            : null;
+        templatePreviewMediaUrl =
+          templateDefinition.header.type === 'TEXT' || templateDefinition.header.type === 'NONE'
+            ? null
+            : pendingUploadToken
+              ? null
+              : persistedMediaUrl || templateDefinition.header.mediaUrl || null;
+        templatePreviewMediaMimeType =
+          templateDefinition.header.type === 'TEXT' || templateDefinition.header.type === 'NONE'
+            ? null
+            : resolvedMediaMimeType ||
+              getTemplateHeaderFallbackMimeType(templateDefinition.header.type);
+        templatePreviewMediaFilename =
+          templateDefinition.header.type === 'DOCUMENT' ? resolvedMediaFilename || null : null;
+        templatePreviewPayload = {
+          header: {
+            type: templateDefinition.header.type,
+            text: renderedTemplateHeaderText,
+            mediaUrl: templatePreviewMediaUrl,
+            mediaMimeType: templatePreviewMediaMimeType,
+            mediaFilename: templatePreviewMediaFilename,
+          },
+          bodyText: renderedTemplateBodyText,
+          footerText: templateDefinition.footerText,
+          buttons: buildTemplatePreviewButtons(
+            templateDefinition.buttons,
+            messageData.templateParameters
+          ),
+        };
         const templateComponents = [
           ...(templateHeaderComponent ? [templateHeaderComponent] : []),
           ...(templateBodyParameters.length > 0
@@ -1903,9 +2010,14 @@ export async function sendMessage({
               ? templateComponents
               : messageData.templateComponents,
         };
+        storedOutgoingPayload = {
+          ...messagePayload,
+          template_preview: templatePreviewPayload,
+        };
 
         templatePreviewText =
-          templateDefinition.bodyText ||
+          renderedTemplateBodyText ||
+          renderedTemplateHeaderText ||
           `[Template: ${templateDefinition.templateName}]`;
         messageData.templateLanguage = templateDefinition.language;
         break;
@@ -1918,6 +2030,21 @@ export async function sendMessage({
         };
     }
     
+    const storedMessageContent = messageData.messageContent || templatePreviewText;
+    const storedMediaUrl = pendingUploadToken
+      ? null
+      : messageData.messageType === 'template'
+        ? templatePreviewMediaUrl || persistedMediaUrl
+        : persistedMediaUrl;
+    const storedMediaMimeType =
+      messageData.messageType === 'template'
+        ? templatePreviewMediaMimeType || resolvedMediaMimeType
+        : resolvedMediaMimeType;
+    const storedMediaFilename =
+      messageData.messageType === 'template'
+        ? templatePreviewMediaFilename
+        : resolvedMediaFilename || messageData.messageContent || templatePreviewText || null;
+
     // Send to Meta
     const sendResult = await sendMessageToMeta({
       messagePayload,
@@ -1961,14 +2088,14 @@ export async function sendMessage({
         conversation.contact_phone,
         'outbound',
         messageData.messageType,
-        messageData.messageContent || templatePreviewText,
-        pendingUploadToken ? null : persistedMediaUrl,
-        resolvedMediaMimeType,
-        resolvedMediaFilename || messageData.messageContent || templatePreviewText,
+        storedMessageContent,
+        storedMediaUrl,
+        storedMediaMimeType,
+        storedMediaFilename,
         messageData.mediaCaption,
         mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
         messageTimestamp,
-        JSON.stringify(messagePayload),
+        JSON.stringify(storedOutgoingPayload || messagePayload),
       ]
     );
     
@@ -1987,21 +2114,39 @@ export async function sendMessage({
         finalMessageId: String(newMessage.id),
       });
 
+      if (messageData.messageType === 'template' && templatePreviewPayload) {
+        templatePreviewPayload = {
+          ...templatePreviewPayload,
+          header: {
+            ...templatePreviewPayload.header,
+            mediaUrl: finalMediaUrl,
+            mediaMimeType: templatePreviewPayload.header.mediaMimeType || resolvedMediaMimeType,
+            mediaFilename: templatePreviewPayload.header.mediaFilename || resolvedMediaFilename || null,
+          },
+        };
+        storedOutgoingPayload = {
+          ...messagePayload,
+          template_preview: templatePreviewPayload,
+        };
+      }
+
       await executeConversationsDb(
         `UPDATE conversation_messages
-         SET media_url = ?, media_mime_type = ?, media_filename = ?, updated_at = CURRENT_TIMESTAMP
+         SET media_url = ?, media_mime_type = ?, media_filename = ?, outgoing_payload = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
         [
           finalMediaUrl,
-          resolvedMediaMimeType,
-          resolvedMediaFilename || messageData.messageContent || templatePreviewText || null,
+          storedMediaMimeType,
+          storedMediaFilename,
+          JSON.stringify(storedOutgoingPayload || messagePayload),
           newMessage.id,
         ]
       );
 
       newMessage.media_url = finalMediaUrl;
-      newMessage.media_mime_type = resolvedMediaMimeType;
-      newMessage.media_filename = resolvedMediaFilename || messageData.messageContent || templatePreviewText || null;
+      newMessage.media_mime_type = storedMediaMimeType;
+      newMessage.media_filename = storedMediaFilename;
+      newMessage.outgoing_payload = storedOutgoingPayload || messagePayload;
       persistedMediaUrl = finalMediaUrl;
     }
     
@@ -2046,7 +2191,7 @@ export async function sendMessage({
         mediaFilename: newMessage.media_filename,
         isPinned: Boolean(newMessage.is_pinned),
         isStarred: Boolean(newMessage.is_starred),
-        outgoingPayload: messagePayload,
+        outgoingPayload: storedOutgoingPayload || messagePayload,
       }
     );
     

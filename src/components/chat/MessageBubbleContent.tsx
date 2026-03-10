@@ -702,6 +702,84 @@ function InteractiveContent({
   );
 }
 
+function TemplateContent({
+  message,
+  content,
+  interactiveData,
+  mediaUrl,
+  mediaMimeType,
+  mediaFilename,
+  isOwn,
+  onOpenMedia,
+  inlineMeta,
+}: {
+  message: Message;
+  content: string;
+  interactiveData: JsonObject | null;
+  mediaUrl: string | null;
+  mediaMimeType: string | null;
+  mediaFilename: string | null;
+  isOwn: boolean;
+  onOpenMedia?: (message: Message) => void;
+  inlineMeta?: ReactNode;
+}) {
+  const headerType = String(interactiveData?.template_header_type || '').toUpperCase();
+  const headerText = getString(interactiveData?.template_header_text);
+  const footerText = getString(interactiveData?.template_footer_text);
+
+  return (
+    <div className="space-y-3">
+      {headerType === 'TEXT' && isMeaningfulText(headerText) ? (
+        <div className="text-sm font-semibold text-inherit">{headerText}</div>
+      ) : null}
+
+      {headerType === 'IMAGE' ? (
+        <ImageContent
+          message={message}
+          mediaUrl={mediaUrl}
+          caption={null}
+          isOwn={isOwn}
+          onOpenMedia={onOpenMedia}
+        />
+      ) : null}
+
+      {headerType === 'VIDEO' ? (
+        <VideoContent
+          message={message}
+          mediaUrl={mediaUrl}
+          caption={null}
+          isOwn={isOwn}
+          onOpenMedia={onOpenMedia}
+        />
+      ) : null}
+
+      {headerType === 'DOCUMENT' ? (
+        <DocumentContent
+          mediaUrl={mediaUrl}
+          filename={mediaFilename}
+          mimeType={mediaMimeType}
+          caption={null}
+          isOwn={isOwn}
+        />
+      ) : null}
+
+      <InteractiveContent
+        content={content}
+        interactiveData={interactiveData}
+        isOwn={isOwn}
+        showTemplateBadge
+        inlineMeta={inlineMeta}
+      />
+
+      {footerText ? (
+        <div className={cn('border-t border-border/70 pt-2 text-xs', getMutedTextClass(isOwn))}>
+          {footerText}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function MessageBubbleContent({ message, isOwn, onOpenMedia, inlineMeta }: MessageBubbleContentProps) {
   const resolved = resolveMessageForRendering(message);
   const caption = getMessageCaption(resolved.content, resolved.mediaCaption);
@@ -770,11 +848,15 @@ export function MessageBubbleContent({ message, isOwn, onOpenMedia, inlineMeta }
 
     case 'template':
       return (
-        <InteractiveContent
+        <TemplateContent
+          message={message}
           content={resolved.content}
           interactiveData={resolved.interactiveData}
+          mediaUrl={resolved.mediaUrl}
+          mediaMimeType={resolved.mediaMimeType}
+          mediaFilename={resolved.mediaFilename}
           isOwn={isOwn}
-          showTemplateBadge
+          onOpenMedia={onOpenMedia}
           inlineMeta={inlineMeta}
         />
       );
