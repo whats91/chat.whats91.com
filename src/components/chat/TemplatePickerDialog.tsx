@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { fetchConversationTemplates, sendMessage as sendConversationMessage, uploadMedia } from '@/lib/api/client';
 import type { ConversationTemplatesResponse, SendMessageRequest, WhatsAppTemplateDefinition } from '@/lib/types/chat';
 import {
@@ -91,6 +92,21 @@ function renderTemplatePreviewText(
   });
 }
 
+function buildInitialTemplateParameterValues(
+  template: WhatsAppTemplateDefinition | null
+): Record<string, string> {
+  if (!template) {
+    return {};
+  }
+
+  return template.parameters.reduce<Record<string, string>>((accumulator, parameter) => {
+    if (parameter.example?.trim()) {
+      accumulator[parameter.key] = parameter.example.trim();
+    }
+    return accumulator;
+  }, {});
+}
+
 export function TemplatePickerDialog({
   open,
   onOpenChange,
@@ -106,6 +122,7 @@ export function TemplatePickerDialog({
   const [selectedMediaFile, setSelectedMediaFile] = useState<File | null>(null);
   const [currentStep, setCurrentStep] = useState<TemplateStep>(1);
   const [isTemplateSearchOpen, setIsTemplateSearchOpen] = useState(false);
+  const [selectedMediaPreviewUrl, setSelectedMediaPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedTemplate = useMemo(
@@ -135,6 +152,7 @@ export function TemplatePickerDialog({
     () => renderTemplatePreviewText(selectedTemplate?.header.text, parameterValues),
     [parameterValues, selectedTemplate]
   );
+  const previewMediaUrl = selectedMediaPreviewUrl || selectedTemplate?.header.mediaUrl || null;
 
   useEffect(() => {
     if (!open) {
@@ -191,10 +209,24 @@ export function TemplatePickerDialog({
   }, [conversationId, open]);
 
   useEffect(() => {
-    setParameterValues({});
+    setParameterValues(buildInitialTemplateParameterValues(selectedTemplate));
     setSelectedMediaFile(null);
     setCurrentStep(1);
-  }, [selectedTemplateId]);
+  }, [selectedTemplate]);
+
+  useEffect(() => {
+    if (!selectedMediaFile) {
+      setSelectedMediaPreviewUrl(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(selectedMediaFile);
+    setSelectedMediaPreviewUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedMediaFile]);
 
   const handleSendTemplate = async () => {
     if (!selectedTemplate) {
@@ -302,7 +334,7 @@ export function TemplatePickerDialog({
                     {templates.map((template) => (
                       <CommandItem
                         key={template.id}
-                        value={`${template.templateName} ${template.category} ${template.language}`}
+                        value={template.templateName}
                         onSelect={() => {
                           setSelectedTemplateId(template.id);
                           setIsTemplateSearchOpen(false);
@@ -387,8 +419,8 @@ export function TemplatePickerDialog({
       const template = selectedTemplate;
 
       return (
-        <ScrollArea className="h-full pr-4">
-          <div className="space-y-4">
+        <div className="h-full overflow-y-auto pr-2">
+          <div className="space-y-4 pb-2">
             <div className="rounded-xl border border-border/70 bg-card/40 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-semibold">{template.templateName}</h3>
@@ -470,7 +502,7 @@ export function TemplatePickerDialog({
                       </label>
                       <Input
                         value={parameterValues[parameter.key] || ''}
-                        placeholder={parameter.example || `Enter ${parameter.label.toLowerCase()}`}
+                        placeholder={`Enter ${parameter.label.toLowerCase()}`}
                         onChange={(event) =>
                           setParameterValues((current) => ({
                             ...current,
@@ -506,7 +538,7 @@ export function TemplatePickerDialog({
               </div>
             ) : null}
           </div>
-        </ScrollArea>
+        </div>
       );
     })()
   );
@@ -528,12 +560,50 @@ export function TemplatePickerDialog({
               ) : null}
 
               {isTemplateMediaHeader(selectedTemplate) ? (
-                <div className="mb-3 rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  {selectedMediaFile
-                    ? `Header ${selectedTemplate.header.type.toLowerCase()}: ${selectedMediaFile.name}`
-                    : selectedTemplate.header.mediaUrl
-                      ? `Header ${selectedTemplate.header.type.toLowerCase()}: using stored template media`
-                      : `Header ${selectedTemplate.header.type.toLowerCase()}: missing media`}
+                <div className="mb-3">
+                  {selectedTemplate.header.type === 'IMAGE' && previewMediaUrl ? (
+                    <div className="overflow-hidden rounded-xl bg-black/5 dark:bg-white/5">
+                      <AspectRatio ratio={4 / 3}>
+                        <img
+                          src={previewMediaUrl}
+                          alt={selectedMediaFile?.name || `${selectedTemplate.templateName} header`}
+                          className="h-full w-full object-cover"
+                        />
+                      </AspectRatio>
+                    </div>
+                  ) : null}
+
+                  {selectedTemplate.header.type === 'VIDEO' && previewMediaUrl ? (
+                    <video
+                      src={previewMediaUrl}
+                      controls
+                      preload="metadata"
+                      className="max-h-[320px] w-full rounded-xl bg-black"
+                    />
+                  ) : null}
+
+                  {selectedTemplate.header.type === 'DOCUMENT' ? (
+                    <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-3 text-sm">
+                      <div className="font-medium text-foreground">
+                        {selectedMediaFile?.name || 'Template document'}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {previewMediaUrl ? 'Document header ready for send' : 'Document header missing'}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!previewMediaUrl ? (
+                    <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                      Header {selectedTemplate.header.type.toLowerCase()}: missing media
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {selectedMediaFile
+                        ? `Using uploaded ${selectedTemplate.header.type.toLowerCase()}: ${selectedMediaFile.name}`
+                        : `Using stored template ${selectedTemplate.header.type.toLowerCase()}`}
+                    </div>
+                  )}
                 </div>
               ) : null}
 
