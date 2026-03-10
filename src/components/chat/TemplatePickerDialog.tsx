@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -296,8 +295,7 @@ export function TemplatePickerDialog({
   };
 
   const renderSelectStep = () => (
-    <ScrollArea className="h-full pr-4">
-      <div className="space-y-4">
+    <div className="space-y-4">
         <div className="space-y-2">
           <div className="text-sm font-medium">Choose template</div>
           <Popover open={isTemplateSearchOpen} onOpenChange={setIsTemplateSearchOpen}>
@@ -406,8 +404,7 @@ export function TemplatePickerDialog({
             </div>
           </div>
         ) : null}
-      </div>
-    </ScrollArea>
+    </div>
   );
 
   const renderFillStep = () => (
@@ -419,8 +416,7 @@ export function TemplatePickerDialog({
       const template = selectedTemplate;
 
       return (
-        <div className="h-full overflow-y-auto pr-2">
-          <div className="space-y-4 pb-2">
+        <div className="space-y-4 min-w-0 pb-2">
             <div className="rounded-xl border border-border/70 bg-card/40 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-semibold">{template.templateName}</h3>
@@ -537,15 +533,13 @@ export function TemplatePickerDialog({
                 </div>
               </div>
             ) : null}
-          </div>
         </div>
       );
     })()
   );
 
   const renderPreviewStep = () => (
-    <ScrollArea className="h-full pr-4">
-      <div className="space-y-4">
+    <div className="space-y-4 min-w-0 pb-2">
         {selectedTemplate ? (
           <div className="rounded-xl border border-border/70 bg-card/40 p-4">
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -554,7 +548,8 @@ export function TemplatePickerDialog({
               <Badge variant="outline">{selectedTemplate.language}</Badge>
             </div>
 
-            <div className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
+            <div className="overflow-x-auto">
+              <div className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
               {selectedTemplate.header.type === 'TEXT' && previewHeaderText ? (
                 <div className="mb-3 text-sm font-semibold text-foreground">{previewHeaderText}</div>
               ) : null}
@@ -634,16 +629,16 @@ export function TemplatePickerDialog({
                   ))}
                 </div>
               ) : null}
+              </div>
             </div>
           </div>
         ) : null}
-      </div>
-    </ScrollArea>
+    </div>
   );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-[min(42rem,calc(100vw-2rem))] max-w-none flex-col overflow-hidden p-0">
+      <DialogContent className="flex h-[min(90vh,48rem)] w-[min(42rem,calc(100vw-2rem))] max-w-none flex-col overflow-hidden p-0">
         <DialogHeader className="shrink-0 px-6 pt-6">
           <DialogTitle>Send Template Message</DialogTitle>
           <DialogDescription>
@@ -671,7 +666,7 @@ export function TemplatePickerDialog({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain px-6 py-4">
           {currentStep === 1 ? renderSelectStep() : null}
           {currentStep === 2 ? renderFillStep() : null}
           {currentStep === 3 ? renderPreviewStep() : null}
