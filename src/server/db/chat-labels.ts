@@ -1,5 +1,13 @@
 import 'server-only';
 
+// Dependency note:
+// Label-field changes here must stay aligned with:
+// - prisma/schema.prisma
+// - src/lib/types/chat.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/components/chat/ChatList.tsx
+// - src/components/chat/RightInfoPanel.tsx
+
 import { db } from '@/lib/db';
 import { Logger } from '@/lib/logger';
 import type { ChatLabel } from '@/lib/types/chat';

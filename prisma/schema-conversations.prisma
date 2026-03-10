@@ -1,6 +1,13 @@
 // ========================================
 // WHATS91 CHAT - CONVERSATIONS DATABASE SCHEMA
 // ========================================
+// Dependency note:
+// If you change a conversations-database model here, also review:
+// - src/server/db/conversations-db.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/lib/types/chat.ts
+// - src/stores/chatStore.ts
+// - src/components/chat/ConversationView.tsx
 // This is a separate schema for the conversations database
 // Used for: Conversations, ConversationMessages, MediaStorage
 // 

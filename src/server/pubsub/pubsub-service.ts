@@ -10,6 +10,14 @@
  * - new_message: New incoming/outgoing message
  * - status_update: Message status change (sent, delivered, read, failed)
  * - conversation_update: Conversation metadata change
+ *
+ * Dependency note:
+ * Event shape or transport changes here must stay aligned with:
+ * - src/lib/types/pubsub.ts
+ * - src/lib/pubsub/client.ts
+ * - src/hooks/use-pubsub.ts
+ * - src/components/shell/AppShell.tsx
+ * - src/app/api/pubsub/stream/route.ts
  */
 
 import 'server-only';

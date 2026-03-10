@@ -1,5 +1,14 @@
 'use client';
 
+// Dependency note:
+// Filter, sidebar-row, export, or menu changes here usually require matching
+// updates in:
+// - src/stores/chatStore.ts
+// - src/lib/api/client.ts
+// - src/lib/types/chat.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/server/db/chat-labels.ts
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';

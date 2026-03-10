@@ -1,5 +1,15 @@
 'use client';
 
+// Dependency note:
+// Message rendering, composer, service-window, or message-action changes here
+// usually require matching updates in:
+// - src/lib/types/chat.ts
+// - src/stores/chatStore.ts
+// - src/lib/api/client.ts
+// - src/lib/messages/resolve-message-for-rendering.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/components/chat/MessageBubbleContent.tsx
+
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';

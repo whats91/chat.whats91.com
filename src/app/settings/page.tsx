@@ -1,5 +1,13 @@
 'use client';
 
+// Dependency note:
+// Settings changes here must stay aligned with:
+// - src/lib/notifications/preferences.ts
+// - src/lib/notifications/service.ts
+// - src/hooks/use-notifications.ts
+// - src/components/shell/AppShell.tsx
+// - src/app/layout.tsx
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';

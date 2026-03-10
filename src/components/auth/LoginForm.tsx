@@ -1,5 +1,13 @@
 'use client';
 
+// Dependency note:
+// Login flow or session-bootstrap changes here must stay aligned with:
+// - src/lib/api/auth-client.ts
+// - src/server/auth/auth-service.ts
+// - src/server/auth/session.ts
+// - src/app/api/auth/**
+// - middleware.ts
+
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';

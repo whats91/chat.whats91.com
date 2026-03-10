@@ -2,6 +2,13 @@
  * Whats91 Chat - Simple Service Worker
  * 
  * Provides offline caching and push notification support
+ *
+ * Dependency note:
+ * Notification click handling or service-worker message shape changes here must
+ * stay aligned with:
+ * - src/lib/notifications/service.ts
+ * - src/components/shell/AppShell.tsx
+ * - public/manifest.json
  */
 
 const CACHE_NAME = 'whats91-v1';

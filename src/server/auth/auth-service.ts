@@ -1,5 +1,13 @@
 import 'server-only';
 
+// Dependency note:
+// User lookup, password, OTP, or auth-token changes here must stay aligned with:
+// - prisma/schema.prisma
+// - src/server/auth/session.ts
+// - src/app/api/auth/**
+// - src/lib/api/auth-client.ts
+// - src/components/auth/LoginForm.tsx
+
 import { db } from '@/lib/db';
 import type { AuthenticatedUser } from '@/lib/types/auth';
 import { issueLoginOtp, verifyLoginOtp, clearLoginOtp } from '@/server/auth/otp-store';

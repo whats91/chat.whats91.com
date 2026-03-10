@@ -1,5 +1,14 @@
 'use client';
 
+// Dependency note:
+// Contact-info, notes, labels, or profile-image changes here usually require
+// matching updates in:
+// - src/stores/chatStore.ts
+// - src/lib/api/client.ts
+// - src/lib/types/chat.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/server/db/chat-labels.ts
+
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDialog';
 import { ConversationLabelsDialog } from '@/components/chat/ConversationLabelsDialog';

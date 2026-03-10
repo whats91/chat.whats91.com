@@ -1,5 +1,14 @@
 'use client';
 
+// Dependency note:
+// Template selection, parameter-fill, or preview changes here must stay aligned
+// with:
+// - src/lib/types/chat.ts
+// - src/lib/api/client.ts
+// - src/server/db/cloud-whatsapp-templates.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/lib/messages/resolve-message-for-rendering.ts
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { fetchConversationTemplates, sendMessage as sendConversationMessage, uploadMedia } from '@/lib/api/client';

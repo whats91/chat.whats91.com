@@ -1,6 +1,15 @@
 // ========================================
 // WHATS91 CHAT - PRISMA SCHEMA
 // ========================================
+// Dependency note:
+// If you change a main-database model here, also review:
+// - src/server/db/mysql.ts
+// - src/server/auth/auth-service.ts
+// - src/server/db/cloud-api-setup.ts
+// - src/server/db/cloud-whatsapp-templates.ts
+// - src/server/db/chat-labels.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/lib/types/chat.ts
 // Runtime: MySQL
 // DATABASE_URL must point to the main application database.
 // ========================================

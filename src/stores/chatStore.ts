@@ -3,6 +3,15 @@
  * 
  * Connected to real database via API
  * Real-time updates via Socket.io
+ *
+ * Dependency note:
+ * State shape and action changes here must stay aligned with:
+ * - src/lib/types/chat.ts
+ * - src/lib/api/client.ts
+ * - src/components/shell/AppShell.tsx
+ * - src/components/chat/ChatList.tsx
+ * - src/components/chat/ConversationView.tsx
+ * - src/components/chat/RightInfoPanel.tsx
  */
 
 import { create } from 'zustand';

@@ -3,6 +3,13 @@ import crypto from 'node:crypto';
 import { db } from '@/lib/db';
 import { Logger } from '@/lib/logger';
 
+// Dependency note:
+// Setup lookup or token-field changes here must stay aligned with:
+// - prisma/schema.prisma
+// - src/server/controllers/conversation-controller.ts
+// - src/server/whatsapp/message-sender.ts
+// - src/app/api/whatsapp/webhooks/route.ts
+
 const log = new Logger('CloudApiSetupDB');
 const ALGORITHM = 'aes-256-gcm';
 

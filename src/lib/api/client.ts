@@ -2,6 +2,14 @@
  * API Client for Whats91 Chat
  * 
  * Handles all HTTP requests to the backend API
+ *
+ * Dependency note:
+ * Route shape or response changes here must stay aligned with:
+ * - src/lib/types/chat.ts
+ * - src/app/api/conversations/**
+ * - src/app/api/auth/**
+ * - src/server/controllers/conversation-controller.ts
+ * - src/stores/chatStore.ts
  */
 
 import type { 

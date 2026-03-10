@@ -1,6 +1,15 @@
 // ========================================
 // WHATS91 CHAT - COMPREHENSIVE TYPE DEFINITIONS
 // ========================================
+// Dependency note:
+// Changes here usually require matching updates in:
+// - src/lib/api/client.ts
+// - src/stores/chatStore.ts
+// - src/components/chat/ConversationView.tsx
+// - src/components/chat/ChatList.tsx
+// - src/components/chat/RightInfoPanel.tsx
+// - src/components/chat/TemplatePickerDialog.tsx
+// - src/server/controllers/conversation-controller.ts
 // Types based on old Node.js implementation
 // ========================================
 

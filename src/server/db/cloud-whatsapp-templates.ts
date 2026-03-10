@@ -1,5 +1,12 @@
 import 'server-only';
 
+// Dependency note:
+// Template parsing or field changes here must stay aligned with:
+// - prisma/schema.prisma
+// - src/lib/types/chat.ts
+// - src/server/controllers/conversation-controller.ts
+// - src/components/chat/TemplatePickerDialog.tsx
+
 import { db } from '@/lib/db';
 import { Logger } from '@/lib/logger';
 import type {

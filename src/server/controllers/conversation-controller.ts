@@ -12,6 +12,19 @@
  * - PATCH /api/conversations/:id/archive - Toggle archive
  * - PATCH /api/conversations/:id/pin - Toggle pin
  * - DELETE /api/conversations/:id - Delete conversation
+ *
+ * Dependency note:
+ * Structural changes here usually require matching updates in:
+ * - src/lib/types/chat.ts
+ * - src/lib/api/client.ts
+ * - src/stores/chatStore.ts
+ * - src/app/api/conversations/**
+ * - src/server/db/conversations-db.ts
+ * - src/server/db/cloud-api-setup.ts
+ * - src/server/db/cloud-whatsapp-templates.ts
+ * - src/server/db/chat-labels.ts
+ * - src/server/media/conversation-media-service.ts
+ * - src/server/storage/wasabi-storage.ts
  */
 
 import 'server-only';

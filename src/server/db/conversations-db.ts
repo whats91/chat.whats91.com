@@ -2,6 +2,12 @@ import 'server-only';
 import { PrismaClient } from '@prisma/client';
 import { Logger } from '@/lib/logger';
 
+// Dependency note:
+// Row shape or helper changes here must stay aligned with:
+// - prisma/schema-conversations.prisma
+// - src/server/controllers/conversation-controller.ts
+// - src/lib/types/chat.ts
+
 const log = new Logger('ConversationsDB');
 
 export interface ConversationDbConfig {

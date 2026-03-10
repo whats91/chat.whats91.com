@@ -1,5 +1,15 @@
 'use client';
 
+// Dependency note:
+// Live-event, notification, and shell-layout changes here usually require
+// matching updates in:
+// - src/hooks/use-pubsub.ts
+// - src/lib/pubsub/client.ts
+// - src/lib/types/pubsub.ts
+// - src/stores/chatStore.ts
+// - src/lib/notifications/service.ts
+// - public/sw.js
+
 import { useEffect, useCallback, useRef, useState } from 'react';
 import type { Message } from '@/lib/types/chat';
 import type {

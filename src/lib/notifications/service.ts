@@ -3,6 +3,14 @@
  * 
  * Cross-browser push notifications for incoming messages
  * Works on Windows, macOS, Linux, Android, iOS
+ *
+ * Dependency note:
+ * Notification behavior changes here must stay aligned with:
+ * - public/sw.js
+ * - src/lib/notifications/preferences.ts
+ * - src/hooks/use-notifications.ts
+ * - src/components/shell/AppShell.tsx
+ * - src/app/settings/page.tsx
  */
 
 export interface NotificationOptions {

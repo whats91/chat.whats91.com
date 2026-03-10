@@ -1,5 +1,12 @@
 'use client';
 
+// Dependency note:
+// Browser pub/sub transport changes here must stay aligned with:
+// - src/lib/types/pubsub.ts
+// - src/hooks/use-pubsub.ts
+// - src/components/shell/AppShell.tsx
+// - src/server/pubsub/pubsub-service.ts
+
 import type {
   PubSubClientPayload,
   PubSubTransportEnvelope,

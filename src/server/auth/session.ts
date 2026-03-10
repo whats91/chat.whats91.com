@@ -1,5 +1,13 @@
 import 'server-only';
 
+// Dependency note:
+// Cookie names, session payload, or CSRF changes here must stay aligned with:
+// - src/app/api/auth/**
+// - middleware.ts
+// - src/lib/auth/session.ts
+// - src/server/auth/auth-service.ts
+// - src/components/auth/LoginForm.tsx
+
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
@@ -216,4 +224,3 @@ export function validateCsrfRequest(request: NextRequest): { valid: true } | { v
 
   return { valid: true };
 }
-
