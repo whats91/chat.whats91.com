@@ -167,6 +167,36 @@ function tryShowNativeNotification(options: NotificationOptions): Notification |
   }
 }
 
+async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!isServiceWorkerSupported()) {
+    return null;
+  }
+
+  try {
+    const existingRegistration =
+      (await navigator.serviceWorker.getRegistration('/')) ||
+      (await navigator.serviceWorker.getRegistration());
+
+    if (existingRegistration) {
+      return existingRegistration;
+    }
+
+    const readyRegistration = await Promise.race<
+      ServiceWorkerRegistration | null
+    >([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => {
+        window.setTimeout(() => resolve(null), 1500);
+      }),
+    ]);
+
+    return readyRegistration;
+  } catch (error) {
+    console.warn('[Notification] Service worker registration lookup failed', error);
+    return null;
+  }
+}
+
 /**
  * Show a notification
  */
@@ -183,30 +213,33 @@ export async function show(options: NotificationOptions): Promise<Notification |
   }
   
   try {
+    const registration = await getServiceWorkerRegistration();
+    if (registration) {
+      try {
+        const notificationOptions: ServiceWorkerNotificationOptions = {
+          body: options.body,
+          icon: options.icon || '/icons/icon-192x192.png',
+          badge: options.badge || '/icons/icon-192x192.png',
+          tag: options.tag,
+          data: options.data,
+          requireInteraction: options.requireInteraction,
+          silent: options.silent,
+          vibrate: options.vibrate || [200, 100, 200],
+          renotify: options.renotify,
+          timestamp: options.timestamp,
+          actions: options.actions,
+        };
+
+        await registration.showNotification(options.title, notificationOptions);
+        return null;
+      } catch (error) {
+        console.warn('[Notification] Service worker notification failed, falling back to native API', error);
+      }
+    }
+
     const nativeNotification = tryShowNativeNotification(options);
     if (nativeNotification) {
       return nativeNotification;
-    }
-
-    if (isServiceWorkerSupported()) {
-      const registration = await navigator.serviceWorker.ready;
-
-      const notificationOptions: ServiceWorkerNotificationOptions = {
-        body: options.body,
-        icon: options.icon || '/icons/icon-192x192.png',
-        badge: options.badge || '/icons/icon-192x192.png',
-        tag: options.tag,
-        data: options.data,
-        requireInteraction: options.requireInteraction,
-        silent: options.silent,
-        vibrate: options.vibrate || [200, 100, 200],
-        renotify: options.renotify,
-        timestamp: options.timestamp,
-        actions: options.actions,
-      };
-
-      await registration.showNotification(options.title, notificationOptions);
-      return null; // Service worker handles the notification
     }
 
     return null;

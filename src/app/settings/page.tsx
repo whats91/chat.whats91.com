@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +22,7 @@ import {
   Monitor,
   Moon,
   Sun,
+  ArrowLeft,
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useNotifications } from '@/hooks/use-notifications';
@@ -35,6 +37,7 @@ import { showPermissionGrantedNotification } from '@/lib/notifications/service';
 type ThemePreference = 'light' | 'dark' | 'system';
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { isSocketConnected } = useChatStore();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const { 
@@ -67,6 +70,15 @@ export default function SettingsPage() {
     }
   };
 
+  const handleBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    router.push('/');
+  };
+
   const selectedTheme: ThemePreference =
     isThemeReady && (theme === 'light' || theme === 'dark' || theme === 'system')
       ? theme
@@ -78,10 +90,24 @@ export default function SettingsPage() {
     <div className="flex-1 overflow-auto">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">
-            Manage your WhatsApp Business account and channel configuration
-          </p>
+          <div className="flex items-start gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="mt-0.5 h-9 w-9 shrink-0 rounded-full"
+              onClick={handleBack}
+              aria-label="Back to chats"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold">Settings</h1>
+              <p className="text-muted-foreground">
+                Manage your WhatsApp Business account and channel configuration
+              </p>
+            </div>
+          </div>
         </div>
         
         <Tabs defaultValue="appearance" className="space-y-6">
