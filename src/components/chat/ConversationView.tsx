@@ -55,6 +55,7 @@ import {
   Check,
   CheckCheck,
   Clock,
+  AlertCircle,
   X,
   Reply,
   Copy,
@@ -1041,6 +1042,8 @@ function MessageBubble({
   const isSent = message.status === 'sent';
   const isDelivered = message.status === 'delivered';
   const isRead = message.status === 'read';
+  const isFailed = message.status === 'failed';
+  const failureLabel = (message.errorMessage || 'Failed').trim();
   
   const renderStatusIcon = () => {
     if (isSending) return <Clock className="h-3 w-3" />;
@@ -1116,7 +1119,10 @@ function MessageBubble({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-  const shouldRenderInlineMeta = showTimestamp && canRenderInlineMessageMeta(message);
+  const shouldRenderInlineMeta =
+    showTimestamp &&
+    canRenderInlineMessageMeta(message) &&
+    !isFailed;
   const messageMeta = showTimestamp ? (
     <span
       className={cn(
@@ -1179,10 +1185,20 @@ function MessageBubble({
         {showTimestamp && !shouldRenderInlineMeta && (
           <div
             className={cn(
-              'flex items-center justify-end gap-1 mt-1 text-xs',
+              'mt-1 flex items-center gap-1 text-xs',
+              isFailed && isOwn ? 'justify-between gap-3' : 'justify-end',
               isOwn ? 'text-[var(--bubble-out-muted)]' : 'text-[var(--bubble-in-muted)]'
             )}
           >
+            {isFailed && isOwn ? (
+              <span
+                className="inline-flex min-w-0 max-w-[14rem] items-center gap-1 text-[11px] font-medium text-destructive"
+                title={failureLabel}
+              >
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                <span className="truncate">{failureLabel}</span>
+              </span>
+            ) : null}
             {messageMeta}
           </div>
         )}
