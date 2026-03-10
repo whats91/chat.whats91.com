@@ -106,6 +106,52 @@ export interface ChatLabel {
   color: string;
 }
 
+export type WhatsAppTemplateCategory = 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
+export type WhatsAppTemplateStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'DRAFT' | 'PAUSED' | 'DISABLED';
+export type WhatsAppTemplateMediaType = 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'NONE';
+export type WhatsAppTemplateParameterFormat = 'POSITIONAL' | 'NAMED';
+export type WhatsAppTemplateButtonType = 'URL' | 'PHONE_NUMBER' | 'QUICK_REPLY';
+
+export interface WhatsAppTemplateParameterDefinition {
+  key: string;
+  label: string;
+  location: 'HEADER' | 'BODY' | 'BUTTON';
+  example?: string | null;
+}
+
+export interface WhatsAppTemplateButtonDefinition {
+  type: WhatsAppTemplateButtonType;
+  text: string;
+  index: number;
+  url?: string | null;
+  phoneNumber?: string | null;
+  dynamicParameterKeys: string[];
+}
+
+export interface WhatsAppTemplateDefinition {
+  id: string;
+  uid?: string | null;
+  templateName: string;
+  baseTemplateName?: string | null;
+  version: number;
+  versionedTemplateName?: string | null;
+  category: WhatsAppTemplateCategory;
+  language: string;
+  status: WhatsAppTemplateStatus;
+  parameterFormat: WhatsAppTemplateParameterFormat;
+  bodyText: string | null;
+  footerText: string | null;
+  header: {
+    type: WhatsAppTemplateMediaType | 'TEXT';
+    text: string | null;
+    mediaUrl: string | null;
+    requiresMediaUpload: boolean;
+  };
+  hasDynamicParameters: boolean;
+  parameters: WhatsAppTemplateParameterDefinition[];
+  buttons: WhatsAppTemplateButtonDefinition[];
+}
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -441,6 +487,16 @@ export interface ConversationMediaResponse {
   } | null;
 }
 
+export interface ConversationTemplatesResponse {
+  success: boolean;
+  message: string;
+  data: {
+    templates: WhatsAppTemplateDefinition[];
+    conversationId: string;
+    serviceWindowOpen: boolean;
+  } | null;
+}
+
 export interface ConversationTarget {
   id: string;
   source: 'conversation' | 'contact';
@@ -732,7 +788,11 @@ export interface SendMessageRequest {
   locationData?: LocationData;
   contactData?: ContactData[];
   templateName?: string;
+  templateRecordId?: string;
+  templateCategory?: WhatsAppTemplateCategory;
   templateLanguage?: string;
+  templateParameterFormat?: WhatsAppTemplateParameterFormat;
+  templateParameters?: string[] | Record<string, string>;
   templateComponents?: Record<string, unknown>[];
 }
 

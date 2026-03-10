@@ -13,6 +13,7 @@ import type {
   ConversationMediaResponse,
   ConversationTargetListResponse,
   ConversationLabelsResponse,
+  ConversationTemplatesResponse,
   MessageInfoResponse,
   SendMessageRequest,
   SendMessageResponse,
@@ -194,6 +195,16 @@ export async function fetchConversationMedia(
       headers: getHeaders(),
     }
   );
+
+  return response.json();
+}
+
+export async function fetchConversationTemplates(
+  conversationId: string | number
+): Promise<ConversationTemplatesResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/templates`, {
+    headers: getHeaders(),
+  });
 
   return response.json();
 }
@@ -499,6 +510,7 @@ export const api = {
     getPinnedMessage: fetchPinnedMessage,
     getStarredMessages: fetchStarredMessages,
     getConversationMedia: fetchConversationMedia,
+    fetchConversationTemplates,
     fetchMessageInfo,
     sendMessage,
     fetchConversationTargets,

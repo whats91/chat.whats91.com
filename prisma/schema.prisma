@@ -141,6 +141,51 @@ model ChatLabel {
   @@map("chat_labels")
 }
 
+model CloudWhatsappTemplate {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  uid               String?  @db.VarChar(255)
+  userId            BigInt   @map("user_id")
+  templateName      String?  @map("template_name") @db.VarChar(512)
+  phoneNumber       BigInt?  @map("phone_number")
+  templateId        String?  @map("template_id") @db.VarChar(45)
+  category          String?  @db.VarChar(45)
+  language          String?  @default("en") @db.VarChar(45)
+  tempData          String?  @map("temp_data") @db.LongText
+  status            String   @default("DRAFT")
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  metaTemplateId    String?  @map("meta_template_id") @db.VarChar(255)
+  wabaId            String?  @map("waba_id") @db.VarChar(255)
+  qualityRating     String?  @default("UNKNOWN") @map("quality_rating")
+  rejectionReason   String?  @map("rejection_reason") @db.Text
+  metaRawData       String?  @map("meta_raw_data") @db.LongText
+  templateMediaUrl  String?  @map("template_media_url") @db.Text
+  templateMediaType String?  @default("NONE") @map("template_media_type")
+  submittedToMetaAt DateTime? @map("submitted_to_meta_at")
+  approvedAt        DateTime? @map("approved_at")
+  lastSyncedAt      DateTime? @map("last_synced_at")
+  parameterFormat   String   @default("POSITIONAL") @map("parameter_format")
+  baseTemplateName  String?  @map("base_template_name") @db.VarChar(512)
+  version           Int      @default(1)
+  versionedTemplateName String? @map("versioned_template_name") @db.VarChar(512)
+  isActiveVersion   Boolean  @default(true) @map("is_active_version")
+  previousVersionId BigInt?  @map("previous_version_id") @db.UnsignedBigInt
+
+  @@unique([userId, templateName], map: "unique_user_template_name")
+  @@unique([userId, baseTemplateName, version], map: "unique_user_template_version")
+  @@index([metaTemplateId], map: "idx_whatsapp_templates_meta_template_id")
+  @@index([wabaId], map: "idx_whatsapp_templates_waba_id")
+  @@index([status], map: "idx_whatsapp_templates_status")
+  @@index([submittedToMetaAt], map: "idx_whatsapp_templates_submitted_to_meta_at")
+  @@index([baseTemplateName], map: "idx_base_template_name")
+  @@index([version], map: "idx_version")
+  @@index([isActiveVersion], map: "idx_is_active_version")
+  @@index([userId, baseTemplateName], map: "idx_user_base_template_lookup")
+  @@index([previousVersionId], map: "fk_previous_version_id")
+  @@index([templateMediaType], map: "idx_template_media_type")
+  @@map("cloud_whatsapp_templates")
+}
+
 // ========================================
 // CONVERSATION MODEL
 // ========================================

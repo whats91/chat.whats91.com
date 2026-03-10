@@ -34,6 +34,7 @@ import { uploadMediaToMeta } from '../whatsapp/media-upload';
 import { publishNewMessage, publishStatusUpdate } from '../pubsub/pubsub-service';
 import { findCloudApiSetupByUserAndPhoneNumberId, findDefaultCloudApiSetupByUser } from '../db/cloud-api-setup';
 import { getChatLabelsByIds, getChatLabelsByUser, getChatLabelsByUserAndPhoneNumber } from '../db/chat-labels';
+import { getApprovedTemplateForSend, getApprovedTemplatesByUserAndPhoneNumber } from '../db/cloud-whatsapp-templates';
 import { executeConversationsDb, queryConversationsDb } from '../db/conversations-db';
 import { buildConversationMediaProxyUrl, MEDIA_MESSAGE_TYPES } from '@/lib/media/conversation-media';
 import { db } from '@/lib/db';
@@ -556,6 +557,143 @@ async function resolveConversationPhoneNumberForLabels(
 
 function isMediaMessageType(value: string | null | undefined): boolean {
   return Boolean(value && MEDIA_MESSAGE_TYPES.has(value));
+}
+
+function extractTemplatePlaceholderSequence(text: string | null | undefined): string[] {
+  if (!text) {
+    return [];
+  }
+
+  return Array.from(text.matchAll(/{{\s*([^}]+?)\s*}}/g))
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value));
+}
+
+function resolveTemplateParameterValue(
+  values: SendMessageRequest['templateParameters'],
+  parameterKey: string,
+  placeholderIndex: number
+): string | null {
+  if (!values) {
+    return null;
+  }
+
+  if (Array.isArray(values)) {
+    const directIndexValue = values[placeholderIndex];
+    if (typeof directIndexValue === 'string' && directIndexValue.trim()) {
+      return directIndexValue.trim();
+    }
+
+    if (/^\d+$/.test(parameterKey)) {
+      const positionalValue = values[Math.max(0, Number(parameterKey) - 1)];
+      if (typeof positionalValue === 'string' && positionalValue.trim()) {
+        return positionalValue.trim();
+      }
+    }
+
+    return null;
+  }
+
+  const rawValue = values[parameterKey];
+  return typeof rawValue === 'string' && rawValue.trim() ? rawValue.trim() : null;
+}
+
+function buildTemplateTextParameters(
+  sourceText: string | null | undefined,
+  values: SendMessageRequest['templateParameters']
+): Array<Record<string, unknown>> {
+  const placeholders = extractTemplatePlaceholderSequence(sourceText);
+  return placeholders.map((parameterKey, index) => ({
+    type: 'text',
+    text: resolveTemplateParameterValue(values, parameterKey, index) || '',
+  }));
+}
+
+function buildTemplateButtonComponents(
+  buttons: Array<{ type: string; index: number; dynamicParameterKeys: string[] }>,
+  values: SendMessageRequest['templateParameters']
+): Array<Record<string, unknown>> {
+  return buttons
+    .filter((button) => button.type === 'URL' && button.dynamicParameterKeys.length > 0)
+    .map((button) => ({
+      type: 'button',
+      sub_type: 'url',
+      index: String(button.index),
+      parameters: button.dynamicParameterKeys.map((parameterKey, index) => ({
+        type: 'text',
+        text: resolveTemplateParameterValue(values, parameterKey, index) || '',
+      })),
+    }));
+}
+
+function buildTemplateHeaderComponent(params: {
+  header: { type: string; text: string | null; mediaUrl: string | null };
+  parameterValues: SendMessageRequest['templateParameters'];
+  mediaUrl: string | null;
+  mediaFilename: string | null;
+}): Record<string, unknown> | null {
+  const { header, parameterValues, mediaUrl, mediaFilename } = params;
+
+  if (header.type === 'TEXT') {
+    const textParameters = buildTemplateTextParameters(header.text, parameterValues);
+    if (textParameters.length === 0) {
+      return null;
+    }
+
+    return {
+      type: 'header',
+      parameters: textParameters,
+    };
+  }
+
+  if (!mediaUrl || header.type === 'NONE') {
+    return null;
+  }
+
+  if (header.type === 'DOCUMENT') {
+    return {
+      type: 'header',
+      parameters: [
+        {
+          type: 'document',
+          document: {
+            link: mediaUrl,
+            ...(mediaFilename ? { filename: mediaFilename } : {}),
+          },
+        },
+      ],
+    };
+  }
+
+  if (header.type === 'IMAGE') {
+    return {
+      type: 'header',
+      parameters: [
+        {
+          type: 'image',
+          image: {
+            link: mediaUrl,
+          },
+        },
+      ],
+    };
+  }
+
+  if (header.type === 'VIDEO') {
+    return {
+      type: 'header',
+      parameters: [
+        {
+          type: 'video',
+          video: {
+            link: mediaUrl,
+          },
+        },
+      ],
+    };
+  }
+
+  return null;
 }
 
 function isConversationBlocked(value: unknown): boolean {
@@ -1492,6 +1630,51 @@ export async function getConversationMediaMessages(
   }
 }
 
+export async function getConversationTemplates(
+  conversationId: number,
+  userId: string
+) {
+  try {
+    const sendContext = await resolveConversationSendContext(conversationId, userId, {
+      requireOpenServiceWindow: false,
+    });
+
+    if (!sendContext.success) {
+      return {
+        success: false,
+        message: sendContext.message,
+        data: null,
+      };
+    }
+
+    const templates = await getApprovedTemplatesByUserAndPhoneNumber(
+      userId,
+      sendContext.data.resolvedPhoneNumber
+    );
+
+    return {
+      success: true,
+      message: 'Conversation templates retrieved successfully',
+      data: {
+        templates,
+        conversationId: String(conversationId),
+        serviceWindowOpen: sendContext.data.serviceWindow.isOpen,
+      },
+    };
+  } catch (error) {
+    log.error('getConversationTemplates error', {
+      error: error instanceof Error ? error.message : error,
+      conversationId,
+      userId,
+    });
+    return {
+      success: false,
+      message: 'Failed to retrieve templates',
+      data: null,
+    };
+  }
+}
+
 // ========================================
 // SEND MESSAGE
 // ========================================
@@ -1515,7 +1698,10 @@ export async function sendMessage({
     let persistedMediaUrl = messageData.mediaUrl || null;
     let resolvedMediaMimeType: string | null = null;
     let resolvedMediaFilename: string | null = null;
-    const sendContext = await resolveConversationSendContext(conversationId, userId);
+    let templatePreviewText: string | null = null;
+    const sendContext = await resolveConversationSendContext(conversationId, userId, {
+      requireOpenServiceWindow: messageData.messageType !== 'template',
+    });
     if (!sendContext.success) {
       return {
         success: false,
@@ -1606,13 +1792,124 @@ export async function sendMessage({
       case 'sticker':
         messagePayload.sticker = { link: mediaUrlForMeta };
         break;
-      case 'template':
+      case 'template': {
+        const templateDefinition = await getApprovedTemplateForSend({
+          userId,
+          phoneNumber: sendContext.data.resolvedPhoneNumber,
+          templateRecordId: messageData.templateRecordId || null,
+          templateName: messageData.templateName || null,
+        });
+
+        if (!templateDefinition) {
+          return {
+            success: false,
+            message: 'Approved template not found for this WhatsApp number',
+            data: null,
+          };
+        }
+
+        if (
+          messageData.templateCategory &&
+          templateDefinition.category !== messageData.templateCategory
+        ) {
+          return {
+            success: false,
+            message: `Template category mismatch. Expected ${templateDefinition.category}.`,
+            data: null,
+          };
+        }
+
+        if (
+          messageData.templateLanguage &&
+          templateDefinition.language.toLowerCase() !== messageData.templateLanguage.toLowerCase()
+        ) {
+          return {
+            success: false,
+            message: `Template language mismatch. Expected ${templateDefinition.language}.`,
+            data: null,
+          };
+        }
+
+        if (
+          messageData.templateParameterFormat &&
+          templateDefinition.parameterFormat !== messageData.templateParameterFormat
+        ) {
+          return {
+            success: false,
+            message: `Template parameter format mismatch. Expected ${templateDefinition.parameterFormat}.`,
+            data: null,
+          };
+        }
+
+        const missingTemplateParameters = templateDefinition.parameters.filter(
+          (parameter, index) =>
+            !resolveTemplateParameterValue(
+              messageData.templateParameters,
+              parameter.key,
+              index
+            )
+        );
+
+        if (missingTemplateParameters.length > 0) {
+          return {
+            success: false,
+            message: `Missing template values for: ${missingTemplateParameters
+              .map((parameter) => parameter.label)
+              .join(', ')}`,
+            data: null,
+          };
+        }
+
+        if (
+          templateDefinition.header.type !== 'NONE' &&
+          templateDefinition.header.type !== 'TEXT' &&
+          !mediaUrlForMeta &&
+          !templateDefinition.header.mediaUrl
+        ) {
+          return {
+            success: false,
+            message: `This template requires ${templateDefinition.header.type.toLowerCase()} header media before sending.`,
+            data: null,
+          };
+        }
+
+        const templateHeaderComponent = buildTemplateHeaderComponent({
+          header: templateDefinition.header,
+          parameterValues: messageData.templateParameters,
+          mediaUrl: mediaUrlForMeta || templateDefinition.header.mediaUrl,
+          mediaFilename: resolvedMediaFilename,
+        });
+        const templateBodyParameters = buildTemplateTextParameters(
+          templateDefinition.bodyText,
+          messageData.templateParameters
+        );
+        const templateButtonComponents = buildTemplateButtonComponents(
+          templateDefinition.buttons,
+          messageData.templateParameters
+        );
+        const templateComponents = [
+          ...(templateHeaderComponent ? [templateHeaderComponent] : []),
+          ...(templateBodyParameters.length > 0
+            ? [{ type: 'body', parameters: templateBodyParameters }]
+            : []),
+          ...templateButtonComponents,
+        ];
+
         messagePayload.template = {
-          name: messageData.templateName,
-          language: { code: messageData.templateLanguage || 'en' },
-          components: messageData.templateComponents,
+          name: templateDefinition.templateName,
+          language: { code: templateDefinition.language },
+          components:
+            templateComponents.length > 0
+              ? templateComponents
+              : messageData.templateComponents,
         };
+
+        templatePreviewText =
+          templateDefinition.bodyText ||
+          `[Template: ${templateDefinition.templateName}]`;
+        messageData.templateLanguage = templateDefinition.language;
         break;
+      }
       default:
         return {
           success: false,
@@ -1664,10 +1961,10 @@ export async function sendMessage({
         conversation.contact_phone,
         'outbound',
         messageData.messageType,
-        messageData.messageContent,
+        messageData.messageContent || templatePreviewText,
         pendingUploadToken ? null : persistedMediaUrl,
         resolvedMediaMimeType,
-        resolvedMediaFilename || messageData.messageContent,
+        resolvedMediaFilename || messageData.messageContent || templatePreviewText,
         messageData.mediaCaption,
         mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
         messageTimestamp,
@@ -1697,14 +1994,14 @@ export async function sendMessage({
         [
           finalMediaUrl,
           resolvedMediaMimeType,
-          resolvedMediaFilename || messageData.messageContent || null,
+          resolvedMediaFilename || messageData.messageContent || templatePreviewText || null,
           newMessage.id,
         ]
       );
 
       newMessage.media_url = finalMediaUrl;
       newMessage.media_mime_type = resolvedMediaMimeType;
-      newMessage.media_filename = resolvedMediaFilename || messageData.messageContent || null;
+      newMessage.media_filename = resolvedMediaFilename || messageData.messageContent || templatePreviewText || null;
       persistedMediaUrl = finalMediaUrl;
     }
     
@@ -1721,7 +2018,7 @@ export async function sendMessage({
        WHERE id = ?`,
       [
         sendResult.messageId,
-        messageData.messageContent || `[${messageData.messageType}]`,
+        messageData.messageContent || templatePreviewText || `[${messageData.messageType}]`,
         messageData.messageType,
         messageTimestamp,
         conversationId,
@@ -1762,10 +2059,10 @@ export async function sendMessage({
           whatsappMessageId: sendResult.messageId,
           direction: 'outbound',
           messageType: messageData.messageType,
-          messageContent: messageData.messageContent,
+          messageContent: messageData.messageContent || templatePreviewText,
           mediaUrl: persistedMediaUrl,
           mediaMimeType: resolvedMediaMimeType,
-          mediaFilename: resolvedMediaFilename || messageData.messageContent || null,
+          mediaFilename: resolvedMediaFilename || messageData.messageContent || templatePreviewText || null,
           mediaCaption: messageData.mediaCaption,
           status: mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
         },
@@ -3416,6 +3713,7 @@ export const conversationController = {
   getStarredMessages,
   getMessageInfo,
   getConversationMediaMessages,
+  getConversationTemplates,
   sendMessage,
   sendVoiceNote,
   markAsRead: markConversationAsRead,

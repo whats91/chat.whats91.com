@@ -51,9 +51,9 @@ export async function POST(
       );
     }
     
-    if (body.messageType === 'template' && !body.templateName) {
+    if (body.messageType === 'template' && !body.templateName && !body.templateRecordId) {
       return NextResponse.json(
-        { success: false, message: 'Template messages require templateName' },
+        { success: false, message: 'Template messages require templateName or templateRecordId' },
         { status: 400 }
       );
     }

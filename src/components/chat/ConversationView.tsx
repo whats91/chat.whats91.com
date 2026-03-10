@@ -7,6 +7,7 @@ import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDial
 import { MessageInfoDialog } from '@/components/chat/MessageInfoDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
+import { TemplatePickerDialog } from '@/components/chat/TemplatePickerDialog';
 import { VoiceMessageButton } from '@/components/chat/VoiceMessageButton';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
@@ -1240,6 +1241,7 @@ function MessageComposer({
   const [message, setMessage] = useState('');
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [isMobileUtilityTrayOpen, setIsMobileUtilityTrayOpen] = useState(false);
+  const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const mobileMessageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1360,15 +1362,27 @@ function MessageComposer({
         </div>
       ) : null}
       {!isBlocked && !isServiceWindowOpen ? (
-        <div className="rounded-md border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
-          Service window is inactive for this chat.
-          {serviceWindowExpiresAt ? (
-            <>
-              {' '}It expired on {formatDateInIst(serviceWindowExpiresAt)} at {formatTimeInIst(serviceWindowExpiresAt)} IST.
-            </>
-          ) : (
-            <> Wait for a new inbound message to reopen the 24-hour window.</>
-          )}
+        <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-card/70 px-3 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <span className="font-medium text-foreground">Service window is inactive for this chat.</span>
+            {serviceWindowExpiresAt ? (
+              <>
+                {' '}It expired on {formatDateInIst(serviceWindowExpiresAt)} at {formatTimeInIst(serviceWindowExpiresAt)} IST.
+              </>
+            ) : (
+              <> Wait for a new inbound message to reopen the 24-hour window.</>
+            )}
+            {' '}Use an approved template message to continue this conversation.
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => setIsTemplateDialogOpen(true)}
+          >
+            Send template
+          </Button>
         </div>
       ) : null}
       {isUploadingAttachment ? (
@@ -1531,6 +1545,13 @@ function MessageComposer({
         className="hidden"
         accept={MEDIA_FILE_ACCEPT}
         onChange={handleAttachmentChange}
+      />
+
+      <TemplatePickerDialog
+        open={isTemplateDialogOpen}
+        onOpenChange={setIsTemplateDialogOpen}
+        conversationId={conversationId}
+        onSent={reloadConversationState}
       />
     </div>
   );
