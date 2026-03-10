@@ -2194,14 +2194,14 @@ export async function sendMessage({
 
     acceptedWhatsappMessageId = sendResult.messageId || null;
     
-    // Create message record
-    const messageTimestamp = new Date();
+    // Create message record using the database clock so DATETIME storage stays
+    // consistent with the conversations database timezone configuration.
     await executeConversationsDb(
       `INSERT INTO conversation_messages 
        (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
         message_type, message_content, media_url, media_mime_type, media_filename, 
         media_caption, status, timestamp, outgoing_payload, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [
         conversationId,
         sendResult.messageId,
@@ -2215,7 +2215,6 @@ export async function sendMessage({
         storedMediaFilename,
         messageData.mediaCaption,
         mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
-        messageTimestamp,
         JSON.stringify(storedOutgoingPayload || messagePayload),
       ]
     );
@@ -2270,6 +2269,8 @@ export async function sendMessage({
       newMessage.outgoing_payload = storedOutgoingPayload || messagePayload;
       persistedMediaUrl = finalMediaUrl;
     }
+
+    const storedMessage = mapConversationMessageRowToMessage(newMessage);
     
     // Update conversation
     await executeConversationsDb(
@@ -2277,16 +2278,15 @@ export async function sendMessage({
         last_message_id = ?,
         last_message_content = ?,
         last_message_type = ?,
-        last_message_at = ?,
+        last_message_at = CURRENT_TIMESTAMP,
         last_message_direction = 'outbound',
         total_messages = total_messages + 1,
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         sendResult.messageId,
         messageData.messageContent || templatePreviewText || `[${messageData.messageType}]`,
         messageData.messageType,
-        messageTimestamp,
         conversationId,
       ]
     );
@@ -2306,7 +2306,7 @@ export async function sendMessage({
         messageType: newMessage.message_type,
         messageContent: newMessage.message_content,
         status: newMessage.status,
-        timestamp: messageTimestamp,
+        timestamp: storedMessage.timestamp,
         mediaUrl: newMessage.media_url,
         mediaMimeType: newMessage.media_mime_type,
         mediaFilename: newMessage.media_filename,
@@ -2480,14 +2480,13 @@ export async function sendVoiceNote(params: {
     }
 
     acceptedWhatsappMessageId = sendResult.messageId;
-    const messageTimestamp = new Date();
 
     await executeConversationsDb(
       `INSERT INTO conversation_messages 
        (conversation_id, whatsapp_message_id, from_phone, to_phone, direction, 
         message_type, message_content, media_url, media_mime_type, media_filename, 
         media_caption, status, timestamp, outgoing_payload, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [
         conversationId,
         sendResult.messageId,
@@ -2501,7 +2500,6 @@ export async function sendVoiceNote(params: {
         preparedAudio.originalFilename,
         null,
         mapConversationMessageStatus(sendResult.messageStatus || 'sent'),
-        messageTimestamp,
         JSON.stringify(messagePayload),
       ]
     );
@@ -2554,21 +2552,22 @@ export async function sendVoiceNote(params: {
       persistedMediaUrl = finalMediaUrl;
     }
 
+    const storedMessage = mapConversationMessageRowToMessage(newMessage);
+
     await executeConversationsDb(
       `UPDATE conversations SET 
         last_message_id = ?,
         last_message_content = ?,
         last_message_type = ?,
-        last_message_at = ?,
+        last_message_at = CURRENT_TIMESTAMP,
         last_message_direction = 'outbound',
         total_messages = total_messages + 1,
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         sendResult.messageId,
         '[audio]',
         'audio',
-        messageTimestamp,
         conversationId,
       ]
     );
@@ -2587,7 +2586,7 @@ export async function sendVoiceNote(params: {
         messageType: 'audio',
         messageContent: null,
         status: newMessage.status,
-        timestamp: messageTimestamp,
+        timestamp: storedMessage.timestamp,
         mediaUrl: persistedMediaUrl,
         mediaMimeType: preparedAudio.mimeType,
         mediaFilename: preparedAudio.originalFilename,
