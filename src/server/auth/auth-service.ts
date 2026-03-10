@@ -14,6 +14,7 @@ interface UserRow {
   phone: string | null;
   username: string | null;
   password: string | null;
+  auth_token?: string | null;
   status: string | number | bigint | null;
   type: string | null;
 }
@@ -155,6 +156,26 @@ async function findUserByIdentifier(identifier: string): Promise<AuthUserRecord 
   return mapAuthUser(rows[0]);
 }
 
+async function findUserByAuthToken(authToken: string): Promise<AuthUserRecord | null> {
+  const normalizedToken = authToken.trim();
+  if (!normalizedToken) {
+    return null;
+  }
+
+  const rows = await db.$queryRawUnsafe<UserRow[]>(
+    `SELECT id, admin_id, name, email, phone, username, password, auth_token, status, type
+     FROM users
+     WHERE auth_token = ?
+       AND status = 1
+       AND deleted_at IS NULL
+     ORDER BY id DESC
+     LIMIT 1`,
+    normalizedToken
+  );
+
+  return mapAuthUser(rows[0]);
+}
+
 async function resolveOtpSenderConfig(user: AuthUserRecord): Promise<{ accessToken: string; phoneNumberId: string } | null> {
   const configOwnerUserId = user.adminId || user.id;
   const setup = await findDefaultCloudApiSetupByUser(configOwnerUserId);
@@ -203,6 +224,33 @@ export async function authenticateWithPassword(
     return {
       success: false,
       message: 'Invalid username or password',
+    };
+  }
+
+  return {
+    success: true,
+    user: sanitizeAuthenticatedUser(user),
+  };
+}
+
+export async function authenticateWithAuthToken(
+  authToken: string
+): Promise<
+  | { success: true; user: AuthenticatedUser }
+  | { success: false; message: string }
+> {
+  const user = await findUserByAuthToken(authToken);
+  if (!user) {
+    return {
+      success: false,
+      message: 'Automatic login link is invalid or expired',
+    };
+  }
+
+  if (!(await ensureParentAccountIsActive(user))) {
+    return {
+      success: false,
+      message: 'No active partner account found for this user',
     };
   }
 

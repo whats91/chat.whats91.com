@@ -42,6 +42,7 @@ model User {
   name      String?
   phone     String?
   avatar    String?
+  authToken String?  @map("auth_token")
   status    String   @default("active")
   role      String   @default("user")
   createdAt DateTime @default(now()) @map("created_at")

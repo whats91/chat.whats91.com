@@ -27,6 +27,10 @@ export interface OtpLoginVerifyRequest {
   otp: string;
 }
 
+export interface AuthTokenLoginRequest {
+  authToken: string;
+}
+
 export interface AuthMutationResponse {
   success: boolean;
   message: string;

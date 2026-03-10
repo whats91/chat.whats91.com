@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   fetchCsrfToken,
+  loginWithAuthToken,
   loginWithPassword,
   requestOtpLogin,
   verifyOtpLogin,
@@ -32,6 +33,8 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = useMemo(() => resolveNextPath(searchParams.get('next')), [searchParams]);
+  const authToken = searchParams.get('auth_token');
+  const processedAuthTokenRef = useRef<string | null>(null);
 
   const [csrfToken, setCsrfToken] = useState('');
   const [activeTab, setActiveTab] = useState<'password' | 'otp'>('password');
@@ -42,6 +45,7 @@ export function LoginForm() {
   const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isOtpPending, setIsOtpPending] = useState(false);
+  const [isTokenLoginPending, setIsTokenLoginPending] = useState(false);
 
   async function refreshCsrfToken() {
     const token = await fetchCsrfToken();
@@ -52,6 +56,49 @@ export function LoginForm() {
   useEffect(() => {
     void refreshCsrfToken();
   }, []);
+
+  useEffect(() => {
+    if (!authToken || processedAuthTokenRef.current === authToken) {
+      return;
+    }
+
+    processedAuthTokenRef.current = authToken;
+    setIsTokenLoginPending(true);
+
+    if (typeof window !== 'undefined') {
+      const nextParam = searchParams.get('next');
+      const sanitizedSearchParams = new URLSearchParams();
+      if (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//')) {
+        sanitizedSearchParams.set('next', nextParam);
+      }
+      const sanitizedUrl = sanitizedSearchParams.toString()
+        ? `/login?${sanitizedSearchParams.toString()}`
+        : '/login';
+
+      // Strip the auth token from the address bar immediately after page load.
+      window.history.replaceState(null, '', sanitizedUrl);
+    }
+
+    void (async () => {
+      try {
+        const response = await loginWithAuthToken({ authToken });
+        if (!response.success || !response.user) {
+          throw new Error(response.message || 'Automatic login failed');
+        }
+
+        await handleAuthSuccess(response.user.id);
+      } catch (error) {
+        clearCurrentUserId();
+        toast({
+          title: 'Automatic login failed',
+          description: error instanceof Error ? error.message : 'Unable to sign you in automatically',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsTokenLoginPending(false);
+      }
+    })();
+  }, [authToken, nextPath, router, searchParams]);
 
   async function handleAuthSuccess(userId: string) {
     setCurrentUserId(userId);
@@ -114,6 +161,8 @@ export function LoginForm() {
       setIsLoading(false);
     }
   }
+
+  const isBusy = isLoading || isTokenLoginPending;
 
   async function handleOtpRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -246,7 +295,7 @@ export function LoginForm() {
                         placeholder="Enter your username"
                         value={identifier}
                         onChange={(event) => setIdentifier(event.target.value)}
-                        disabled={isLoading}
+                        disabled={isBusy}
                       />
                     </div>
 
@@ -259,12 +308,12 @@ export function LoginForm() {
                         placeholder="Enter your password"
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
-                        disabled={isLoading}
+                        disabled={isBusy}
                       />
                     </div>
 
-                    <Button className="w-full" type="submit" disabled={isLoading}>
-                      {isLoading && activeTab === 'password' ? (
+                    <Button className="w-full" type="submit" disabled={isBusy}>
+                      {isBusy && activeTab === 'password' ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : null}
                       Continue to chat
@@ -283,15 +332,15 @@ export function LoginForm() {
                           placeholder="Enter your WhatsApp number"
                           value={otpPhone}
                           onChange={(event) => setOtpPhone(event.target.value)}
-                          disabled={isLoading || isOtpPending}
+                          disabled={isBusy || isOtpPending}
                         />
                         <p className="text-xs leading-5 text-muted-foreground">
                           The OTP is sent to the phone number already stored on your user record.
                         </p>
                       </div>
 
-                      <Button className="w-full" type="submit" disabled={isLoading || isOtpPending}>
-                        {isLoading && activeTab === 'otp' && !isOtpPending ? (
+                      <Button className="w-full" type="submit" disabled={isBusy || isOtpPending}>
+                        {isBusy && activeTab === 'otp' && !isOtpPending ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         ) : null}
                         Send OTP
@@ -315,7 +364,7 @@ export function LoginForm() {
                         </div>
 
                         <div className="flex justify-center">
-                          <InputOTP maxLength={6} value={otpValue} onChange={setOtpValue} disabled={!isOtpPending || isLoading}>
+                          <InputOTP maxLength={6} value={otpValue} onChange={setOtpValue} disabled={!isOtpPending || isBusy}>
                             <InputOTPGroup>
                               <InputOTPSlot index={0} />
                               <InputOTPSlot index={1} />
@@ -331,8 +380,8 @@ export function LoginForm() {
                         </div>
 
                         <div className="flex flex-col gap-3 sm:flex-row">
-                          <Button className="flex-1" type="submit" disabled={!isOtpPending || isLoading}>
-                            {isLoading && activeTab === 'otp' && isOtpPending ? (
+                          <Button className="flex-1" type="submit" disabled={!isOtpPending || isBusy}>
+                            {isBusy && activeTab === 'otp' && isOtpPending ? (
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : null}
                             Verify OTP
@@ -342,7 +391,7 @@ export function LoginForm() {
                             variant="outline"
                             className="flex-1"
                             onClick={resetOtpFlow}
-                            disabled={isLoading}
+                            disabled={isBusy}
                           >
                             Change number
                           </Button>

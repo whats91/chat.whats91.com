@@ -1,4 +1,5 @@
 import type {
+  AuthTokenLoginRequest,
   AuthMutationResponse,
   AuthSessionResponse,
   OtpLoginRequest,
@@ -84,3 +85,16 @@ export async function logout(csrfToken: string): Promise<AuthMutationResponse> {
   return parseJson<AuthMutationResponse>(response);
 }
 
+export async function loginWithAuthToken(
+  payload: AuthTokenLoginRequest
+): Promise<AuthMutationResponse> {
+  const response = await fetch(`${AUTH_API_BASE}/login/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  return parseJson<AuthMutationResponse>(response);
+}
