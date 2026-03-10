@@ -14,8 +14,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { cn } from '@/lib/utils';
-import { Paperclip, Upload } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronsUpDown, Paperclip, Upload } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 interface TemplatePickerDialogProps {
@@ -24,6 +33,14 @@ interface TemplatePickerDialogProps {
   conversationId: string;
   onSent?: () => Promise<void> | void;
 }
+
+type TemplateStep = 1 | 2 | 3;
+
+const TEMPLATE_STEPS: Array<{ id: TemplateStep; label: string }> = [
+  { id: 1, label: 'Select' },
+  { id: 2, label: 'Fill' },
+  { id: 3, label: 'Preview' },
+];
 
 function getTemplateMediaAccept(template: WhatsAppTemplateDefinition | null): string {
   if (!template) {
@@ -43,11 +60,7 @@ function getTemplateMediaAccept(template: WhatsAppTemplateDefinition | null): st
 }
 
 function isTemplateMediaHeader(template: WhatsAppTemplateDefinition | null): boolean {
-  return Boolean(
-    template &&
-      template.header.type !== 'NONE' &&
-      template.header.type !== 'TEXT'
-  );
+  return Boolean(template && template.header.type !== 'NONE' && template.header.type !== 'TEXT');
 }
 
 function buildTemplateParameterPayload(
@@ -55,10 +68,27 @@ function buildTemplateParameterPayload(
   values: Record<string, string>
 ): SendMessageRequest['templateParameters'] {
   if (template.parameterFormat === 'POSITIONAL') {
-    return template.parameters.map((parameter) => values[parameter.key] || '');
+    return template.parameters.map((parameter) => values[parameter.key]?.trim() || '');
   }
 
-  return values;
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, value.trim()])
+  );
+}
+
+function renderTemplatePreviewText(
+  text: string | null | undefined,
+  values: Record<string, string>
+): string {
+  if (!text) {
+    return '';
+  }
+
+  return text.replace(/{{\s*([^}]+?)\s*}}/g, (_match, rawKey: string) => {
+    const key = rawKey.trim();
+    const replacement = values[key]?.trim();
+    return replacement || `{{${key}}}`;
+  });
 }
 
 export function TemplatePickerDialog({
@@ -74,6 +104,8 @@ export function TemplatePickerDialog({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedMediaFile, setSelectedMediaFile] = useState<File | null>(null);
+  const [currentStep, setCurrentStep] = useState<TemplateStep>(1);
+  const [isTemplateSearchOpen, setIsTemplateSearchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedTemplate = useMemo(
@@ -81,8 +113,35 @@ export function TemplatePickerDialog({
     [selectedTemplateId, templates]
   );
 
+  const missingParameter = useMemo(
+    () =>
+      selectedTemplate?.parameters.find(
+        (parameter) => !parameterValues[parameter.key]?.trim()
+      ) || null,
+    [parameterValues, selectedTemplate]
+  );
+
+  const isMissingRequiredMedia =
+    isTemplateMediaHeader(selectedTemplate) &&
+    !selectedMediaFile &&
+    !selectedTemplate?.header.mediaUrl;
+
+  const previewBodyText = useMemo(
+    () => renderTemplatePreviewText(selectedTemplate?.bodyText, parameterValues),
+    [parameterValues, selectedTemplate]
+  );
+
+  const previewHeaderText = useMemo(
+    () => renderTemplatePreviewText(selectedTemplate?.header.text, parameterValues),
+    [parameterValues, selectedTemplate]
+  );
+
   useEffect(() => {
     if (!open) {
+      setCurrentStep(1);
+      setIsTemplateSearchOpen(false);
+      setParameterValues({});
+      setSelectedMediaFile(null);
       return;
     }
 
@@ -134,6 +193,7 @@ export function TemplatePickerDialog({
   useEffect(() => {
     setParameterValues({});
     setSelectedMediaFile(null);
+    setCurrentStep(1);
   }, [selectedTemplateId]);
 
   const handleSendTemplate = async () => {
@@ -144,18 +204,11 @@ export function TemplatePickerDialog({
     try {
       setIsSending(true);
 
-      const missingParameter = selectedTemplate.parameters.find(
-        (parameter) => !parameterValues[parameter.key]?.trim()
-      );
       if (missingParameter) {
         throw new Error(`Please fill ${missingParameter.label} before sending.`);
       }
 
-      if (
-        isTemplateMediaHeader(selectedTemplate) &&
-        !selectedMediaFile &&
-        !selectedTemplate.header.mediaUrl
-      ) {
+      if (isMissingRequiredMedia) {
         throw new Error(
           `This template requires ${selectedTemplate.header.type.toLowerCase()} header media before sending.`
         );
@@ -210,198 +263,393 @@ export function TemplatePickerDialog({
     }
   };
 
+  const renderSelectStep = () => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <div className="text-sm font-medium">Choose template</div>
+        <Popover open={isTemplateSearchOpen} onOpenChange={setIsTemplateSearchOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-expanded={isTemplateSearchOpen}
+              className="h-auto w-full justify-between px-3 py-3 text-left"
+              disabled={isLoading || templates.length === 0}
+            >
+              <div className="min-w-0">
+                {selectedTemplate ? (
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{selectedTemplate.templateName}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {selectedTemplate.category} · {selectedTemplate.language} · v{selectedTemplate.version}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Search and select a template</span>
+                )}
+              </div>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[min(32rem,calc(100vw-2rem))] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search templates..." />
+              <CommandList>
+                <CommandEmpty>No templates found.</CommandEmpty>
+                <CommandGroup>
+                  {templates.map((template) => (
+                    <CommandItem
+                      key={template.id}
+                      value={`${template.templateName} ${template.category} ${template.language}`}
+                      onSelect={() => {
+                        setSelectedTemplateId(template.id);
+                        setIsTemplateSearchOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          'mr-2 h-4 w-4',
+                          selectedTemplateId === template.id ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{template.templateName}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {template.category} · {template.language} · {template.header.type}
+                        </div>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {isLoading ? (
+        <div className="rounded-xl border border-border/70 bg-card/40 px-4 py-10 text-center text-sm text-muted-foreground">
+          Loading templates...
+        </div>
+      ) : null}
+
+      {!isLoading && error ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {!isLoading && !error && templates.length === 0 ? (
+        <div className="rounded-xl border border-border/70 bg-card/40 px-4 py-10 text-center text-sm text-muted-foreground">
+          No approved templates are available for this WhatsApp number.
+        </div>
+      ) : null}
+
+      {selectedTemplate ? (
+        <div className="rounded-xl border border-border/70 bg-card/40 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold">{selectedTemplate.templateName}</h3>
+            <Badge variant="secondary">{selectedTemplate.category}</Badge>
+            <Badge variant="outline">{selectedTemplate.language}</Badge>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Header</div>
+              <div className="mt-1 text-sm font-medium">{selectedTemplate.header.type}</div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Parameters</div>
+              <div className="mt-1 text-sm font-medium">{selectedTemplate.parameters.length}</div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Buttons</div>
+              <div className="mt-1 text-sm font-medium">{selectedTemplate.buttons.length}</div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+              <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Format</div>
+              <div className="mt-1 text-sm font-medium">{selectedTemplate.parameterFormat}</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const renderFillStep = () => (
+    (() => {
+      if (!selectedTemplate) {
+        return null;
+      }
+
+      const template = selectedTemplate;
+
+      return (
+        <ScrollArea className="max-h-[56vh] pr-4">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border/70 bg-card/40 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-semibold">{template.templateName}</h3>
+                <Badge variant="secondary">{template.category}</Badge>
+                <Badge variant="outline">{template.language}</Badge>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Fill any required variables and upload header media if this template needs it.
+              </p>
+            </div>
+
+            {template.header.type === 'TEXT' ? (
+              <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
+                <div className="mb-2 text-sm font-medium">Header text</div>
+                <p className="text-sm text-muted-foreground">
+                  {template.header.text || 'This template uses a text header.'}
+                </p>
+              </div>
+            ) : null}
+
+            {isTemplateMediaHeader(template) ? (
+              <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
+                <div className="mb-2 text-sm font-medium">
+                  Header {template.header.type.toLowerCase()}
+                </div>
+                {template.header.mediaUrl ? (
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Stored template media is available. Upload a new file only if you want to override it for this send.
+                  </p>
+                ) : (
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    This template requires a {template.header.type.toLowerCase()} file before sending.
+                  </p>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={getTemplateMediaAccept(template)}
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    event.target.value = '';
+                    setSelectedMediaFile(file);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Paperclip className="mr-2 h-4 w-4" />
+                  {selectedMediaFile ? 'Replace media' : 'Upload media'}
+                </Button>
+                {selectedMediaFile ? (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Selected: {selectedMediaFile.name}
+                  </div>
+                ) : null}
+                {isMissingRequiredMedia ? (
+                  <div className="mt-2 text-xs text-destructive">
+                    Upload is required for this template header.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {template.parameters.length ? (
+              <div className="space-y-3">
+                <div className="text-sm font-medium">Template values</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {template.parameters.map((parameter) => (
+                    <div key={`${parameter.location}-${parameter.key}`} className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {parameter.label}
+                        <span className="ml-1 uppercase tracking-[0.12em]">
+                          {parameter.location}
+                        </span>
+                      </label>
+                      <Input
+                        value={parameterValues[parameter.key] || ''}
+                        placeholder={parameter.example || `Enter ${parameter.label.toLowerCase()}`}
+                        onChange={(event) =>
+                          setParameterValues((current) => ({
+                            ...current,
+                            [parameter.key]: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+                {missingParameter ? (
+                  <div className="text-xs text-destructive">
+                    {missingParameter.label} is required before you can review the message.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {template.buttons.length ? (
+              <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
+                <div className="mb-2 text-sm font-medium">Buttons</div>
+                <div className="space-y-2">
+                  {template.buttons.map((button) => (
+                    <div key={`${button.type}-${button.index}`} className="text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{button.text}</span>
+                      {' '}· {button.type}
+                      {button.dynamicParameterKeys.length > 0 ? (
+                        <span> · dynamic values: {button.dynamicParameterKeys.join(', ')}</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </ScrollArea>
+      );
+    })()
+  );
+
+  const renderPreviewStep = () => (
+    <ScrollArea className="max-h-[56vh] pr-4">
+      <div className="space-y-4">
+        {selectedTemplate ? (
+          <div className="rounded-xl border border-border/70 bg-card/40 p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold">{selectedTemplate.templateName}</h3>
+              <Badge variant="secondary">{selectedTemplate.category}</Badge>
+              <Badge variant="outline">{selectedTemplate.language}</Badge>
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
+              {selectedTemplate.header.type === 'TEXT' && previewHeaderText ? (
+                <div className="mb-3 text-sm font-semibold text-foreground">{previewHeaderText}</div>
+              ) : null}
+
+              {isTemplateMediaHeader(selectedTemplate) ? (
+                <div className="mb-3 rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  {selectedMediaFile
+                    ? `Header ${selectedTemplate.header.type.toLowerCase()}: ${selectedMediaFile.name}`
+                    : selectedTemplate.header.mediaUrl
+                      ? `Header ${selectedTemplate.header.type.toLowerCase()}: using stored template media`
+                      : `Header ${selectedTemplate.header.type.toLowerCase()}: missing media`}
+                </div>
+              ) : null}
+
+              {previewBodyText ? (
+                <div className="whitespace-pre-wrap text-sm text-foreground">
+                  {previewBodyText}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">This template has no body text.</div>
+              )}
+
+              {selectedTemplate.footerText ? (
+                <div className="mt-3 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+                  {selectedTemplate.footerText}
+                </div>
+              ) : null}
+
+              {selectedTemplate.buttons.length > 0 ? (
+                <div className="mt-3 space-y-2 border-t border-border/70 pt-3">
+                  {selectedTemplate.buttons.map((button) => (
+                    <div
+                      key={`${button.type}-${button.index}`}
+                      className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm"
+                    >
+                      <div className="font-medium text-foreground">{button.text}</div>
+                      <div className="text-xs text-muted-foreground">{button.type}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </ScrollArea>
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Send Template Message</DialogTitle>
           <DialogDescription>
-            Select an approved WhatsApp template for this customer and fill any required values before sending.
+            Select a template, fill the required values, then review the final WhatsApp message before sending.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-          <ScrollArea className="max-h-[60vh] rounded-xl border border-border/70">
-            <div className="space-y-2 p-3">
-              {isLoading ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">Loading templates...</div>
-              ) : null}
-
-              {!isLoading && error ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                  {error}
-                </div>
-              ) : null}
-
-              {!isLoading && !error && templates.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  No approved templates are available for this WhatsApp number.
-                </div>
-              ) : null}
-
-              {templates.map((template) => {
-                const isSelected = template.id === selectedTemplateId;
-
-                return (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className={cn(
-                      'w-full rounded-xl border px-3 py-3 text-left transition-colors',
-                      isSelected
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border/70 bg-card/40 hover:bg-accent/60'
-                    )}
-                    onClick={() => setSelectedTemplateId(template.id)}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-sm font-medium">{template.templateName}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {template.language} · v{template.version}
-                        </div>
-                      </div>
-                      <Badge variant="outline">{template.category}</Badge>
-                    </div>
-                  </button>
-                );
-              })}
+        <div className="grid grid-cols-3 gap-2">
+          {TEMPLATE_STEPS.map((step) => (
+            <div
+              key={step.id}
+              className={cn(
+                'rounded-lg border px-3 py-2 text-center text-sm font-medium',
+                currentStep === step.id
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : currentStep > step.id
+                    ? 'border-border bg-muted/30 text-foreground'
+                    : 'border-border/70 bg-card/30 text-muted-foreground'
+              )}
+            >
+              {step.label}
             </div>
-          </ScrollArea>
+          ))}
+        </div>
 
-          <div className="min-w-0 rounded-xl border border-border/70 bg-card/40 p-4">
-            {selectedTemplate ? (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-base font-semibold">{selectedTemplate.templateName}</h3>
-                    <Badge variant="secondary">{selectedTemplate.category}</Badge>
-                    <Badge variant="outline">{selectedTemplate.language}</Badge>
-                  </div>
-                  {selectedTemplate.bodyText ? (
-                    <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-                      {selectedTemplate.bodyText}
-                    </p>
-                  ) : null}
-                </div>
+        <div className="min-h-[380px]">
+          {currentStep === 1 ? renderSelectStep() : null}
+          {currentStep === 2 ? renderFillStep() : null}
+          {currentStep === 3 ? renderPreviewStep() : null}
+        </div>
 
-                {selectedTemplate.header.type === 'TEXT' ? (
-                  <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
-                    <div className="mb-2 text-sm font-medium">Header text</div>
-                    <p className="text-sm text-muted-foreground">
-                      {selectedTemplate.header.text || 'This template uses a text header.'}
-                    </p>
-                  </div>
-                ) : null}
+        <div className="flex items-center justify-between gap-2">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
 
-                {isTemplateMediaHeader(selectedTemplate) ? (
-                  <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
-                    <div className="mb-2 text-sm font-medium">
-                      Header {selectedTemplate.header.type.toLowerCase()}
-                    </div>
-                    {selectedTemplate.header.mediaUrl ? (
-                      <p className="mb-2 text-xs text-muted-foreground">
-                        Existing template media is available. Upload a new file only if you want to override it for this send.
-                      </p>
-                    ) : (
-                      <p className="mb-2 text-xs text-muted-foreground">
-                        This template requires a {selectedTemplate.header.type.toLowerCase()} file before sending.
-                      </p>
-                    )}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept={getTemplateMediaAccept(selectedTemplate)}
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0] || null;
-                        event.target.value = '';
-                        setSelectedMediaFile(file);
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Paperclip className="mr-2 h-4 w-4" />
-                      {selectedMediaFile ? 'Replace media' : 'Upload media'}
-                    </Button>
-                    {selectedMediaFile ? (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        Selected: {selectedMediaFile.name}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
+          <div className="flex items-center gap-2">
+            {currentStep > 1 ? (
+              <Button type="button" variant="outline" onClick={() => setCurrentStep((current) => (current - 1) as TemplateStep)}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+            ) : null}
 
-                {selectedTemplate.parameters.length > 0 ? (
-                  <div className="space-y-3">
-                    <div className="text-sm font-medium">Template values</div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {selectedTemplate.parameters.map((parameter) => (
-                        <div key={`${parameter.location}-${parameter.key}`} className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground">
-                            {parameter.label}
-                            <span className="ml-1 uppercase tracking-[0.12em]">
-                              {parameter.location}
-                            </span>
-                          </label>
-                          <Input
-                            value={parameterValues[parameter.key] || ''}
-                            placeholder={parameter.example || `Enter ${parameter.label.toLowerCase()}`}
-                            onChange={(event) =>
-                              setParameterValues((current) => ({
-                                ...current,
-                                [parameter.key]: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+            {currentStep === 1 ? (
+              <Button
+                type="button"
+                onClick={() => setCurrentStep(2)}
+                disabled={!selectedTemplate || isLoading || Boolean(error)}
+              >
+                Next
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            ) : null}
 
-                {selectedTemplate.buttons.length > 0 ? (
-                  <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
-                    <div className="mb-2 text-sm font-medium">Buttons</div>
-                    <div className="space-y-2">
-                      {selectedTemplate.buttons.map((button) => (
-                        <div key={`${button.type}-${button.index}`} className="text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">{button.text}</span>
-                          {' '}· {button.type}
-                          {button.dynamicParameterKeys.length > 0 ? (
-                            <span> · dynamic values: {button.dynamicParameterKeys.join(', ')}</span>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+            {currentStep === 2 ? (
+              <Button
+                type="button"
+                onClick={() => setCurrentStep(3)}
+                disabled={!selectedTemplate || Boolean(missingParameter) || isMissingRequiredMedia}
+              >
+                Review
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            ) : null}
 
-                <div className="flex items-center justify-end gap-2">
-                  <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="button" onClick={() => void handleSendTemplate()} disabled={isSending}>
-                    {isSending ? (
-                      <>
-                        <Upload className="mr-2 h-4 w-4 animate-pulse" />
-                        Sending...
-                      </>
-                    ) : (
-                      'Send template'
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex h-full min-h-[260px] items-center justify-center text-sm text-muted-foreground">
-                Select a template to continue.
-              </div>
-            )}
+            {currentStep === 3 ? (
+              <Button type="button" onClick={() => void handleSendTemplate()} disabled={isSending}>
+                {isSending ? (
+                  <>
+                    <Upload className="mr-2 h-4 w-4 animate-pulse" />
+                    Sending...
+                  </>
+                ) : (
+                  'Send template'
+                )}
+              </Button>
+            ) : null}
           </div>
         </div>
       </DialogContent>

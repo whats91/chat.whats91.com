@@ -270,19 +270,22 @@ function mergeConversationPages(existing: Conversation[], incoming: Conversation
   return sortConversations(Array.from(conversationMap.values()));
 }
 
-function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof fetchConversations>>['data']['conversations'][number]): Conversation {
+function mapConversationListItemToConversation(
+  conv: Awaited<ReturnType<typeof fetchConversations>>['data']['conversations'][number],
+  existingConversation?: Conversation | null
+): Conversation {
   return {
     id: String(conv.id),
-    userId: getCurrentUserId(),
+    userId: existingConversation?.userId || getCurrentUserId(),
     contactPhone: conv.contactPhone,
     contactName: conv.contactName,
-    conversationNotes: null,
+    conversationNotes: existingConversation?.conversationNotes ?? null,
     profileImageUrl: conv.profileImageUrl,
     labels: conv.labels || [],
-    whatsappPhoneNumberId: '',
-    isServiceWindowOpen: true,
-    serviceWindowStartedAt: null,
-    serviceWindowExpiresAt: null,
+    whatsappPhoneNumberId: existingConversation?.whatsappPhoneNumberId || '',
+    isServiceWindowOpen: existingConversation?.isServiceWindowOpen ?? true,
+    serviceWindowStartedAt: existingConversation?.serviceWindowStartedAt ?? null,
+    serviceWindowExpiresAt: existingConversation?.serviceWindowExpiresAt ?? null,
     lastMessageId: conv.lastMessageContent ? `last-${conv.id}` : null,
     lastMessageContent: conv.lastMessageContent,
     lastMessageType: (conv.lastMessageType || 'text') as Message['type'],
@@ -320,8 +323,8 @@ function mapConversationListItemToConversation(conv: Awaited<ReturnType<typeof f
     isMuted: conv.isMuted,
     isBlocked: conv.isBlocked,
     status: conv.status,
-    metaData: null,
-    createdAt: new Date(),
+    metaData: existingConversation?.metaData ?? null,
+    createdAt: existingConversation?.createdAt ?? new Date(),
     updatedAt: conv.lastMessageAt
       ? new Date(conv.lastMessageAt)
       : conv.updatedAt
@@ -494,7 +497,16 @@ export const useChatStore = create<ChatState>()(
           }
           
           if (response.success && response.data) {
-            const incomingConversations = response.data.conversations.map(mapConversationListItemToConversation);
+            const latestConversations = get().conversations;
+            const existingConversationMap = new Map(
+              latestConversations.map((conversation) => [conversation.id, conversation])
+            );
+            const incomingConversations = response.data.conversations.map((conversation) =>
+              mapConversationListItemToConversation(
+                conversation,
+                existingConversationMap.get(String(conversation.id)) || null
+              )
+            );
 
             set((currentState) => ({
               conversations: append
