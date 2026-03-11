@@ -32,6 +32,11 @@ import type {
   UpdateConversationProfileImageResponse,
 } from '@/lib/types/chat';
 import type { AssistMessageRequest, AssistMessageResponse } from '@/lib/types/ai';
+import type {
+  TeamMemberInput,
+  TeamMemberMutationResponse,
+  TeamMembersResponse,
+} from '@/lib/types/team-member';
 
 const API_BASE = '/api';
 
@@ -134,6 +139,51 @@ export async function fetchConversations(params: {
 
 export async function fetchChatLabels(): Promise<ChatLabelsResponse> {
   const response = await fetch(`${API_BASE}/chat-labels`, {
+    headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+export async function fetchTeamMembers(): Promise<TeamMembersResponse> {
+  const response = await fetch(`${API_BASE}/team-members`, {
+    headers: getHeaders(),
+    cache: 'no-store',
+  });
+
+  return response.json();
+}
+
+export async function createTeamMember(
+  payload: TeamMemberInput
+): Promise<TeamMemberMutationResponse> {
+  const response = await fetch(`${API_BASE}/team-members`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+  return response.json();
+}
+
+export async function updateTeamMember(
+  teamMemberId: string,
+  payload: TeamMemberInput
+): Promise<TeamMemberMutationResponse> {
+  const response = await fetch(`${API_BASE}/team-members/${teamMemberId}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+  return response.json();
+}
+
+export async function deleteTeamMember(
+  teamMemberId: string
+): Promise<{ success: boolean; message?: string }> {
+  const response = await fetch(`${API_BASE}/team-members/${teamMemberId}`, {
+    method: 'DELETE',
     headers: getHeaders(),
   });
 

@@ -196,6 +196,22 @@ model CloudWhatsappTemplate {
   @@map("cloud_whatsapp_templates")
 }
 
+model TeamMember {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  uid          String   @unique @db.VarChar(255)
+  userId       BigInt   @map("user_id") @db.UnsignedBigInt
+  name         String   @db.VarChar(255)
+  email        String?  @db.VarChar(255)
+  mobileNumber String?  @map("mobile_number") @db.VarChar(32)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  @@index([userId], map: "idx_team_members_user_id")
+  @@index([email], map: "idx_team_members_email")
+  @@index([mobileNumber], map: "idx_team_members_mobile_number")
+  @@map("team_members")
+}
+
 // ========================================
 // CONVERSATION MODEL
 // ========================================
