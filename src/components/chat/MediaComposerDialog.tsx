@@ -10,11 +10,10 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import {
   Crop,
   FileText,
-  Highlighter,
-  Image as ImageIcon,
   Loader2,
+  PenLine,
+  RotateCcw,
   Undo2,
-  Video,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,9 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
@@ -41,6 +37,8 @@ type HighlightPoint = {
 type HighlightStroke = {
   points: HighlightPoint[];
 };
+
+type ToolMode = 'crop' | 'highlight' | null;
 
 interface MediaComposerDialogProps {
   open: boolean;
@@ -96,6 +94,10 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function isDefaultCrop(crop: CropState): boolean {
+  return crop.x === 0 && crop.y === 0 && crop.width === 100 && crop.height === 100;
+}
+
 function pointsForPreviewStroke(
   stroke: HighlightStroke,
   naturalWidth: number,
@@ -135,7 +137,7 @@ export function MediaComposerDialog({
   const previewKind = useMemo(() => inferPreviewKind(file), [file]);
   const [caption, setCaption] = useState(initialCaption);
   const [crop, setCrop] = useState<CropState>(DEFAULT_CROP);
-  const [isHighlightMode, setIsHighlightMode] = useState(false);
+  const [activeTool, setActiveTool] = useState<ToolMode>(null);
   const [strokes, setStrokes] = useState<HighlightStroke[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [imageElement, setImageElement] = useState<HTMLImageElement | null>(null);
@@ -145,25 +147,24 @@ export function MediaComposerDialog({
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const drawingStrokeRef = useRef<HighlightPoint[]>([]);
+  const cropDragStartRef = useRef<HighlightPoint | null>(null);
   const isDrawingRef = useRef(false);
 
   const supportsCaption = previewKind !== 'audio';
   const supportsEditing = previewKind === 'image' && Boolean(imageElement);
-  const cropAspectRatio = useMemo(() => {
+  const imageAspectRatio = useMemo(() => {
     if (!imageElement) {
       return 4 / 3;
     }
 
-    const cropWidth = Math.max(1, (crop.width / 100) * imageElement.naturalWidth);
-    const cropHeight = Math.max(1, (crop.height / 100) * imageElement.naturalHeight);
-    return cropWidth / cropHeight;
-  }, [crop.height, crop.width, imageElement]);
+    return imageElement.naturalWidth / imageElement.naturalHeight;
+  }, [imageElement]);
 
   useEffect(() => {
     if (!open) {
       setCaption(initialCaption);
       setCrop(DEFAULT_CROP);
-      setIsHighlightMode(false);
+      setActiveTool(null);
       setStrokes([]);
       setImageElement(null);
       setImageError(null);
@@ -172,7 +173,7 @@ export function MediaComposerDialog({
 
     setCaption(initialCaption);
     setCrop(DEFAULT_CROP);
-    setIsHighlightMode(false);
+    setActiveTool(null);
     setStrokes([]);
     setImageError(null);
   }, [initialCaption, open]);
@@ -230,7 +231,7 @@ export function MediaComposerDialog({
     }
 
     const canvas = previewCanvasRef.current;
-    const previewHeight = Math.max(1, Math.round(previewWidth / cropAspectRatio));
+    const previewHeight = Math.max(1, Math.round(previewWidth / imageAspectRatio));
     const pixelRatio = window.devicePixelRatio || 1;
 
     canvas.width = Math.max(1, Math.round(previewWidth * pixelRatio));
@@ -246,18 +247,12 @@ export function MediaComposerDialog({
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.scale(pixelRatio, pixelRatio);
     context.clearRect(0, 0, previewWidth, previewHeight);
-
-    const cropX = (crop.x / 100) * imageElement.naturalWidth;
-    const cropY = (crop.y / 100) * imageElement.naturalHeight;
-    const cropWidth = Math.max(1, (crop.width / 100) * imageElement.naturalWidth);
-    const cropHeight = Math.max(1, (crop.height / 100) * imageElement.naturalHeight);
-
     context.drawImage(
       imageElement,
-      cropX,
-      cropY,
-      cropWidth,
-      cropHeight,
+      0,
+      0,
+      imageElement.naturalWidth,
+      imageElement.naturalHeight,
       0,
       0,
       previewWidth,
@@ -270,14 +265,10 @@ export function MediaComposerDialog({
     context.lineWidth = Math.max(6, Math.min(16, previewWidth * 0.018));
 
     for (const stroke of strokes) {
-      const previewPoints = pointsForPreviewStroke(
-        stroke,
-        imageElement.naturalWidth,
-        imageElement.naturalHeight,
-        crop,
-        previewWidth,
-        previewHeight
-      );
+      const previewPoints = stroke.points.map((point) => ({
+        x: point.x * previewWidth,
+        y: point.y * previewHeight,
+      }));
 
       if (previewPoints.length < 2) {
         continue;
@@ -290,36 +281,29 @@ export function MediaComposerDialog({
       }
       context.stroke();
     }
-  }, [crop, cropAspectRatio, imageElement, previewWidth, strokes, supportsEditing]);
+    if (!isDefaultCrop(crop) || activeTool === 'crop') {
+      const cropLeft = (crop.x / 100) * previewWidth;
+      const cropTop = (crop.y / 100) * previewHeight;
+      const cropWidth = (crop.width / 100) * previewWidth;
+      const cropHeight = (crop.height / 100) * previewHeight;
 
-  const handleCropValueChange = (key: keyof CropState, nextValue: number) => {
-    setCrop((current) => {
-      const draft = { ...current, [key]: nextValue };
+      context.fillStyle = 'rgba(0, 0, 0, 0.38)';
+      context.fillRect(0, 0, previewWidth, cropTop);
+      context.fillRect(0, cropTop + cropHeight, previewWidth, previewHeight - (cropTop + cropHeight));
+      context.fillRect(0, cropTop, cropLeft, cropHeight);
+      context.fillRect(cropLeft + cropWidth, cropTop, previewWidth - (cropLeft + cropWidth), cropHeight);
 
-      if (key === 'x') {
-        draft.x = clamp(nextValue, 0, 90);
-        draft.width = clamp(draft.width, 10, 100 - draft.x);
-      }
-
-      if (key === 'y') {
-        draft.y = clamp(nextValue, 0, 90);
-        draft.height = clamp(draft.height, 10, 100 - draft.y);
-      }
-
-      if (key === 'width') {
-        draft.width = clamp(nextValue, 10, 100 - draft.x);
-      }
-
-      if (key === 'height') {
-        draft.height = clamp(nextValue, 10, 100 - draft.y);
-      }
-
-      return draft;
-    });
-  };
+      context.save();
+      context.setLineDash([10, 8]);
+      context.strokeStyle = 'rgba(255, 255, 255, 0.96)';
+      context.lineWidth = 2;
+      context.strokeRect(cropLeft, cropTop, cropWidth, cropHeight);
+      context.restore();
+    }
+  }, [activeTool, crop, imageAspectRatio, imageElement, previewWidth, strokes, supportsEditing]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!supportsEditing || !isHighlightMode || !imageElement || !previewCanvasRef.current) {
+    if (!supportsEditing || !imageElement || !previewCanvasRef.current || !activeTool) {
       return;
     }
 
@@ -328,26 +312,36 @@ export function MediaComposerDialog({
     if (!rect.width || !rect.height) {
       return;
     }
-
-    const cropX = (crop.x / 100) * imageElement.naturalWidth;
-    const cropY = (crop.y / 100) * imageElement.naturalHeight;
-    const cropWidth = (crop.width / 100) * imageElement.naturalWidth;
-    const cropHeight = (crop.height / 100) * imageElement.naturalHeight;
     const relativeX = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const relativeY = clamp((event.clientY - rect.top) / rect.height, 0, 1);
 
     const point = {
-      x: (cropX + relativeX * cropWidth) / imageElement.naturalWidth,
-      y: (cropY + relativeY * cropHeight) / imageElement.naturalHeight,
+      x: relativeX,
+      y: relativeY,
     };
 
-    drawingStrokeRef.current = [point];
     isDrawingRef.current = true;
+
+    if (activeTool === 'crop') {
+      cropDragStartRef.current = point;
+      setCrop({
+        x: point.x * 100,
+        y: point.y * 100,
+        width: 2,
+        height: 2,
+      });
+    }
+
+    if (activeTool === 'highlight') {
+      drawingStrokeRef.current = [point];
+      setStrokes((current) => [...current, { points: [point] }]);
+    }
+
     canvas.setPointerCapture(event.pointerId);
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!supportsEditing || !isHighlightMode || !isDrawingRef.current || !imageElement || !previewCanvasRef.current) {
+    if (!supportsEditing || !isDrawingRef.current || !imageElement || !previewCanvasRef.current || !activeTool) {
       return;
     }
 
@@ -356,17 +350,32 @@ export function MediaComposerDialog({
     if (!rect.width || !rect.height) {
       return;
     }
-
-    const cropX = (crop.x / 100) * imageElement.naturalWidth;
-    const cropY = (crop.y / 100) * imageElement.naturalHeight;
-    const cropWidth = (crop.width / 100) * imageElement.naturalWidth;
-    const cropHeight = (crop.height / 100) * imageElement.naturalHeight;
     const relativeX = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const relativeY = clamp((event.clientY - rect.top) / rect.height, 0, 1);
 
+    if (activeTool === 'crop') {
+      const start = cropDragStartRef.current;
+      if (!start) {
+        return;
+      }
+
+      const left = clamp(Math.min(start.x, relativeX) * 100, 0, 100);
+      const top = clamp(Math.min(start.y, relativeY) * 100, 0, 100);
+      const right = clamp(Math.max(start.x, relativeX) * 100, 0, 100);
+      const bottom = clamp(Math.max(start.y, relativeY) * 100, 0, 100);
+
+      setCrop({
+        x: left,
+        y: top,
+        width: Math.max(2, right - left),
+        height: Math.max(2, bottom - top),
+      });
+      return;
+    }
+
     drawingStrokeRef.current.push({
-      x: (cropX + relativeX * cropWidth) / imageElement.naturalWidth,
-      y: (cropY + relativeY * cropHeight) / imageElement.naturalHeight,
+      x: relativeX,
+      y: relativeY,
     });
 
     setStrokes((current) => {
@@ -389,7 +398,7 @@ export function MediaComposerDialog({
       return;
     }
 
-    if (drawingStrokeRef.current.length > 0) {
+    if (activeTool === 'highlight' && drawingStrokeRef.current.length > 0) {
       setStrokes((current) => {
         if (current.length === 0) {
           return [{ points: [...drawingStrokeRef.current] }];
@@ -402,6 +411,7 @@ export function MediaComposerDialog({
     }
 
     drawingStrokeRef.current = [];
+    cropDragStartRef.current = null;
     isDrawingRef.current = false;
   };
 
@@ -412,7 +422,7 @@ export function MediaComposerDialog({
   const handleResetImageEdits = () => {
     setCrop(DEFAULT_CROP);
     setStrokes([]);
-    setIsHighlightMode(false);
+    setActiveTool(null);
   };
 
   const buildPreparedFile = async (): Promise<File> => {
@@ -421,6 +431,10 @@ export function MediaComposerDialog({
     }
 
     if (!supportsEditing || !imageElement) {
+      return file;
+    }
+
+    if (isDefaultCrop(crop) && strokes.length === 0) {
       return file;
     }
 
@@ -538,203 +552,126 @@ export function MediaComposerDialog({
               No media selected.
             </div>
           ) : (
-            <div className="grid min-h-full gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-              <div className="min-w-0 space-y-4">
-                <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
-                  <div className="border-b border-border/70 px-4 py-3 text-sm text-muted-foreground">
-                    {file.name}
-                  </div>
-                  <div className="bg-muted/20 p-4">
-                    {previewKind === 'image' ? (
-                      <div className="space-y-3">
-                        <div
-                          ref={previewViewportRef}
-                          className="mx-auto w-full max-w-2xl overflow-hidden rounded-xl border border-border/60 bg-black/5"
-                          style={{ aspectRatio: cropAspectRatio }}
-                        >
-                          {imageError ? (
-                            <div className="flex h-full min-h-[18rem] items-center justify-center px-6 text-center text-sm text-destructive">
-                              {imageError}
-                            </div>
-                          ) : (
+            <div className="mx-auto min-h-full w-full max-w-3xl">
+              <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
+                <div className="bg-muted/20 p-3 md:p-4">
+                  {previewKind === 'image' ? (
+                    <div className="space-y-3">
+                      <div
+                        ref={previewViewportRef}
+                        className="relative mx-auto w-full overflow-hidden rounded-xl border border-border/60 bg-black/5"
+                        style={{ aspectRatio: imageAspectRatio }}
+                      >
+                        {imageError ? (
+                          <div className="flex h-full min-h-[18rem] items-center justify-center px-6 text-center text-sm text-destructive">
+                            {imageError}
+                          </div>
+                        ) : (
+                          <>
                             <canvas
                               ref={previewCanvasRef}
                               className={cn(
                                 'block h-full w-full touch-none',
-                                isHighlightMode ? 'cursor-crosshair' : 'cursor-default'
+                                activeTool ? 'cursor-crosshair' : 'cursor-default'
                               )}
                               onPointerDown={handlePointerDown}
                               onPointerMove={handlePointerMove}
                               onPointerUp={(event) => finishStroke(event.pointerId)}
                               onPointerLeave={() => finishStroke()}
                             />
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant={isHighlightMode ? 'default' : 'outline'}
-                            size="sm"
-                            disabled={!supportsEditing}
-                            onClick={() => setIsHighlightMode((current) => !current)}
-                          >
-                            <Highlighter className="mr-2 h-4 w-4" />
-                            Highlight
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={!supportsEditing || strokes.length === 0}
-                            onClick={handleUndoStroke}
-                          >
-                            <Undo2 className="mr-2 h-4 w-4" />
-                            Undo
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={!supportsEditing}
-                            onClick={handleResetImageEdits}
-                          >
-                            <Crop className="mr-2 h-4 w-4" />
-                            Reset edits
-                          </Button>
-                        </div>
+                            <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-full border border-border/60 bg-background/88 p-1 shadow-sm backdrop-blur">
+                              <Button
+                                type="button"
+                                variant={activeTool === 'crop' ? 'default' : 'ghost'}
+                                size="icon"
+                                className="h-8 w-8 rounded-full"
+                                disabled={!supportsEditing}
+                                title="Crop"
+                                aria-label="Crop"
+                                onClick={() => setActiveTool((current) => (current === 'crop' ? null : 'crop'))}
+                              >
+                                <Crop className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant={activeTool === 'highlight' ? 'default' : 'ghost'}
+                                size="icon"
+                                className="h-8 w-8 rounded-full"
+                                disabled={!supportsEditing}
+                                title="Highlight"
+                                aria-label="Highlight"
+                                onClick={() => setActiveTool((current) => (current === 'highlight' ? null : 'highlight'))}
+                              >
+                                <PenLine className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full"
+                                disabled={!supportsEditing || strokes.length === 0}
+                                title="Undo highlight"
+                                aria-label="Undo highlight"
+                                onClick={handleUndoStroke}
+                              >
+                                <Undo2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full"
+                                disabled={!supportsEditing || (isDefaultCrop(crop) && strokes.length === 0)}
+                                title="Reset edits"
+                                aria-label="Reset edits"
+                                onClick={handleResetImageEdits}
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    ) : null}
+                    </div>
+                  ) : null}
 
-                    {previewKind === 'video' && previewUrl ? (
-                      <video
-                        src={previewUrl}
-                        controls
-                        className="mx-auto max-h-[26rem] w-full rounded-xl bg-black"
-                      />
-                    ) : null}
+                  {previewKind === 'video' && previewUrl ? (
+                    <video
+                      src={previewUrl}
+                      controls
+                      className="mx-auto max-h-[32rem] w-full rounded-xl bg-black"
+                    />
+                  ) : null}
 
-                    {previewKind === 'audio' && previewUrl ? (
-                      <div className="rounded-xl border border-border/70 bg-background/80 p-4">
-                        <audio src={previewUrl} controls className="w-full" />
+                  {previewKind === 'audio' && previewUrl ? (
+                    <div className="rounded-xl border border-border/70 bg-background/80 p-4">
+                      <audio src={previewUrl} controls className="w-full" />
+                    </div>
+                  ) : null}
+
+                  {previewKind === 'document' ? (
+                    <div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/70 bg-background/60 p-6 text-center">
+                      <FileText className="h-10 w-10 text-muted-foreground" />
+                      <div>
+                        <div className="font-medium text-foreground">{file.name}</div>
+                        <div className="text-sm text-muted-foreground">{getDocumentDetails(file)}</div>
                       </div>
-                    ) : null}
-
-                    {previewKind === 'document' ? (
-                      <div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/70 bg-background/60 p-6 text-center">
-                        <FileText className="h-10 w-10 text-muted-foreground" />
-                        <div>
-                          <div className="font-medium text-foreground">{file.name}</div>
-                          <div className="text-sm text-muted-foreground">{getDocumentDetails(file)}</div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 {supportsCaption ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="media-preview-caption">Caption</Label>
+                  <div className="border-t border-border/70 p-3 md:p-4">
                     <Textarea
                       id="media-preview-caption"
                       value={caption}
                       onChange={(event) => setCaption(event.target.value)}
                       placeholder="Add a caption"
-                      className="min-h-[96px] resize-none"
+                      className="min-h-[104px] resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                     />
                   </div>
                 ) : null}
               </div>
-
-              <ScrollArea className="max-h-[calc(92vh-11rem)] min-h-0 rounded-2xl border border-border/70 bg-card/50">
-                <div className="space-y-5 p-4">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-foreground">Preview details</div>
-                    <p className="text-sm text-muted-foreground">
-                      {previewKind === 'image'
-                        ? 'Crop the image and use highlight mode to emphasize parts before sending.'
-                        : previewKind === 'video'
-                          ? 'Preview the video and add a caption before sending.'
-                          : previewKind === 'audio'
-                            ? 'Preview the audio before sending.'
-                            : 'Review the document details before sending.'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-border/70 bg-background/70 p-3 text-sm">
-                    <div className="flex items-center gap-2 font-medium text-foreground">
-                      {previewKind === 'image' ? <ImageIcon className="h-4 w-4" /> : null}
-                      {previewKind === 'video' ? <Video className="h-4 w-4" /> : null}
-                      {previewKind === 'document' ? <FileText className="h-4 w-4" /> : null}
-                      <span className="capitalize">{previewKind}</span>
-                    </div>
-                    <div className="mt-2 text-muted-foreground">{getDocumentDetails(file)}</div>
-                  </div>
-
-                  {supportsEditing ? (
-                    <div className="space-y-4">
-                      <div className="text-sm font-medium text-foreground">Crop</div>
-                      <div className="space-y-3">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Left</span>
-                            <span>{Math.round(crop.x)}%</span>
-                          </div>
-                          <Slider
-                            value={[crop.x]}
-                            min={0}
-                            max={90}
-                            step={1}
-                            onValueChange={(values) => handleCropValueChange('x', values[0] || 0)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Top</span>
-                            <span>{Math.round(crop.y)}%</span>
-                          </div>
-                          <Slider
-                            value={[crop.y]}
-                            min={0}
-                            max={90}
-                            step={1}
-                            onValueChange={(values) => handleCropValueChange('y', values[0] || 0)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Width</span>
-                            <span>{Math.round(crop.width)}%</span>
-                          </div>
-                          <Slider
-                            value={[crop.width]}
-                            min={10}
-                            max={100 - crop.x}
-                            step={1}
-                            onValueChange={(values) => handleCropValueChange('width', values[0] || 10)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Height</span>
-                            <span>{Math.round(crop.height)}%</span>
-                          </div>
-                          <Slider
-                            value={[crop.height]}
-                            min={10}
-                            max={100 - crop.y}
-                            step={1}
-                            onValueChange={(values) => handleCropValueChange('height', values[0] || 10)}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border/70 bg-background/70 p-3 text-sm text-muted-foreground">
-                      Editing tools are currently available for images only. Videos, audio, and documents still open in preview before send.
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
             </div>
           )}
         </div>
