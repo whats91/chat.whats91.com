@@ -1491,11 +1491,11 @@ function MessageComposer({
                   <MessageRewritePopover
                     text={message}
                     conversationId={conversationId}
-                    disabled={isBlocked || isUploadingAttachment}
-                    onApply={applyRewrite}
-                    buttonClassName="h-8 w-8"
-                    iconClassName="h-4 w-4"
-                    contentClassName="max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto"
+                  disabled={isBlocked || isUploadingAttachment}
+                  onApply={applyRewrite}
+                  buttonClassName="h-8 w-8"
+                  iconClassName="h-4 w-4"
+                  contentClassName="max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto"
                   />
                 </div>
               </div>

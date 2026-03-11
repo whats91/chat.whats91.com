@@ -1,7 +1,7 @@
 'use client';
 
 // Dependency note:
-// Rewrite UI changes here must stay aligned with:
+// AI assist UI changes here must stay aligned with:
 // - src/lib/api/client.ts
 // - src/lib/types/ai.ts
 // - src/app/api/ai/rewrite/route.ts
@@ -10,10 +10,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { rewriteMessageDraft } from '@/lib/api/client';
-import type { RewriteMessageChoices } from '@/lib/types/ai';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { assistMessageDraft } from '@/lib/api/client';
+import {
+  AI_TRANSLATION_LANGUAGE_OPTIONS,
+  type AssistMessageResult,
+  type MessageAssistMode,
+  type TranslationLanguageCode,
+} from '@/lib/types/ai';
 import { cn } from '@/lib/utils';
-import { Loader2, RefreshCcw, Sparkles } from 'lucide-react';
+import { Languages, Loader2, RefreshCcw, Sparkles } from 'lucide-react';
 
 interface MessageRewritePopoverProps {
   text: string;
@@ -46,6 +59,12 @@ function RewriteCard({ title, value, onApply }: RewriteCardProps) {
   );
 }
 
+function getLanguageDisplayName(language: (typeof AI_TRANSLATION_LANGUAGE_OPTIONS)[number]): string {
+  return 'nativeLabel' in language && language.nativeLabel
+    ? `${language.label} (${language.nativeLabel})`
+    : language.label;
+}
+
 export function MessageRewritePopover({
   text,
   conversationId,
@@ -57,13 +76,21 @@ export function MessageRewritePopover({
   align = 'end',
 }: MessageRewritePopoverProps) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<MessageAssistMode>('rewrite');
+  const [targetLanguage, setTargetLanguage] = useState<TranslationLanguageCode>('en');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [choices, setChoices] = useState<RewriteMessageChoices | null>(null);
-  const [lastRequestedText, setLastRequestedText] = useState('');
+  const [result, setResult] = useState<AssistMessageResult | null>(null);
+  const [lastRequestedKey, setLastRequestedKey] = useState('');
   const trimmedText = useMemo(() => text.trim(), [text]);
+  const rewriteResult = result?.mode === 'rewrite' ? result.rewrite ?? null : null;
+  const translationResult = result?.mode === 'translate' ? result.translation ?? null : null;
+  const requestKey = useMemo(
+    () => `${mode}:${targetLanguage}:${trimmedText}`,
+    [mode, targetLanguage, trimmedText]
+  );
 
-  const generateRewrites = async () => {
+  const generateAssistResult = async () => {
     if (!trimmedText || disabled) {
       return;
     }
@@ -71,20 +98,22 @@ export function MessageRewritePopover({
     try {
       setIsLoading(true);
       setErrorMessage(null);
-      const response = await rewriteMessageDraft({
+      const response = await assistMessageDraft({
         text: trimmedText,
         conversationId,
+        mode,
+        targetLanguage: mode === 'translate' ? targetLanguage : undefined,
       });
 
       if (!response.success || !response.data) {
-        throw new Error(response.message || 'Unable to rewrite the message');
+        throw new Error(response.message || 'Unable to process the message');
       }
 
-      setChoices(response.data);
-      setLastRequestedText(trimmedText);
+      setResult(response.data);
+      setLastRequestedKey(requestKey);
     } catch (error) {
-      setChoices(null);
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to rewrite the message');
+      setResult(null);
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to process the message');
     } finally {
       setIsLoading(false);
     }
@@ -95,12 +124,12 @@ export function MessageRewritePopover({
       return;
     }
 
-    if (choices && lastRequestedText === trimmedText) {
+    if (result && lastRequestedKey === requestKey) {
       return;
     }
 
-    void generateRewrites();
-  }, [choices, disabled, lastRequestedText, open, trimmedText]);
+    void generateAssistResult();
+  }, [disabled, lastRequestedKey, open, requestKey, result, trimmedText]);
 
   useEffect(() => {
     if (!open) {
@@ -108,11 +137,20 @@ export function MessageRewritePopover({
     }
 
     if (!trimmedText) {
-      setChoices(null);
+      setResult(null);
       setErrorMessage(null);
-      setLastRequestedText('');
+      setLastRequestedKey('');
     }
   }, [open, trimmedText]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setResult(null);
+    setErrorMessage(null);
+  }, [mode, open, targetLanguage]);
 
   const handleApply = (value: string) => {
     onApply(value);
@@ -139,9 +177,9 @@ export function MessageRewritePopover({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">Rewrite with AI</p>
+            <p className="text-sm font-semibold text-foreground">AI assist</p>
             <p className="text-xs text-muted-foreground">
-              Generates two polished versions in the same language as your draft.
+              Rewrite or translate the current draft without leaving the composer.
             </p>
           </div>
           <Button
@@ -150,22 +188,57 @@ export function MessageRewritePopover({
             size="icon"
             className="h-7 w-7 shrink-0"
             disabled={disabled || !trimmedText || isLoading}
-            onClick={() => void generateRewrites()}
+            onClick={() => void generateAssistResult()}
           >
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
           </Button>
         </div>
 
+        <Tabs
+          value={mode}
+          onValueChange={(value) => setMode(value as MessageAssistMode)}
+          className="gap-3"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="rewrite">Rewrite</TabsTrigger>
+            <TabsTrigger value="translate">Translate</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {mode === 'translate' ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Target language</p>
+            <Select
+              value={targetLanguage}
+              onValueChange={(value) => setTargetLanguage(value as TranslationLanguageCode)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select language" />
+              </SelectTrigger>
+              <SelectContent>
+                {AI_TRANSLATION_LANGUAGE_OPTIONS.map((language) => (
+                  <SelectItem key={language.code} value={language.code}>
+                    <span className="flex items-center gap-2">
+                      <Languages className="h-3.5 w-3.5 opacity-60" />
+                      <span>{getLanguageDisplayName(language)}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+
         {!trimmedText ? (
           <div className="rounded-md border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">
-            Type a message first to generate rewrites.
+            Type a message first to use AI assist.
           </div>
         ) : null}
 
         {trimmedText && isLoading ? (
           <div className="flex items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Generating rewrite suggestions...
+            {mode === 'translate' ? 'Generating translation...' : 'Generating rewrite suggestions...'}
           </div>
         ) : null}
 
@@ -175,19 +248,27 @@ export function MessageRewritePopover({
           </div>
         ) : null}
 
-        {choices && !isLoading ? (
+        {rewriteResult && !isLoading ? (
           <div className="space-y-3">
             <RewriteCard
               title="Professional"
-              value={choices.professional}
-              onApply={() => handleApply(choices.professional)}
+              value={rewriteResult.professional}
+              onApply={() => handleApply(rewriteResult.professional)}
             />
             <RewriteCard
               title="Alternative"
-              value={choices.alternative}
-              onApply={() => handleApply(choices.alternative)}
+              value={rewriteResult.alternative}
+              onApply={() => handleApply(rewriteResult.alternative)}
             />
           </div>
+        ) : null}
+
+        {translationResult && !isLoading ? (
+          <RewriteCard
+            title={`Translated to ${translationResult.targetLanguageLabel}`}
+            value={translationResult.translated}
+            onApply={() => handleApply(translationResult.translated)}
+          />
         ) : null}
       </PopoverContent>
     </Popover>

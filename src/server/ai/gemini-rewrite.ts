@@ -7,16 +7,24 @@ import 'server-only';
 // - src/components/chat/MessageRewritePopover.tsx
 
 import { Logger } from '@/lib/logger';
+import {
+  AI_TRANSLATION_LANGUAGE_OPTIONS,
+  type AssistMessageResult,
+  type MessageAssistMode,
+  type TranslationLanguageCode,
+} from '@/lib/types/ai';
 
 const log = new Logger('GeminiRewrite');
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
-interface RewriteMessageInput {
+interface AssistMessageInput {
   text: string;
   conversationId?: string;
   userId: string;
+  mode: MessageAssistMode;
+  targetLanguage?: TranslationLanguageCode;
 }
 
 interface GeminiGenerateContentResponse {
@@ -36,10 +44,13 @@ interface GeminiGenerateContentResponse {
   };
 }
 
-export interface RewriteMessageResult {
-  professional: string;
-  alternative: string;
-  model: string;
+function getTargetLanguageLabel(code: TranslationLanguageCode): string {
+  const match = AI_TRANSLATION_LANGUAGE_OPTIONS.find((option) => option.code === code);
+  if (match) {
+    return match.label;
+  }
+
+  return code;
 }
 
 function getGeminiApiKey(): string {
@@ -64,9 +75,17 @@ function getTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
 }
 
-function getTemperature(): number {
-  const raw = Number(process.env.GEMINI_REWRITE_TEMPERATURE);
-  return Number.isFinite(raw) ? raw : 0.7;
+function getTemperature(mode: MessageAssistMode): number {
+  const envKey =
+    mode === 'translate'
+      ? process.env.GEMINI_TRANSLATE_TEMPERATURE
+      : process.env.GEMINI_REWRITE_TEMPERATURE;
+  const raw = Number(envKey);
+  if (Number.isFinite(raw)) {
+    return raw;
+  }
+
+  return mode === 'translate' ? 0.3 : 0.7;
 }
 
 function getTopP(): number {
@@ -79,7 +98,7 @@ function getMaxOutputTokens(): number {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 400;
 }
 
-function buildPrompt(text: string): string {
+function buildRewritePrompt(text: string): string {
   return [
     'You rewrite WhatsApp chat drafts for customer communication.',
     'Return exactly one JSON object with keys "professional" and "alternative".',
@@ -90,6 +109,22 @@ function buildPrompt(text: string): string {
     '- "professional" should be polished, respectful, and business-appropriate.',
     '- "alternative" should be a different natural variation with the same intent.',
     '- Do not wrap the JSON in markdown fences.',
+    '',
+    'User draft:',
+    text,
+  ].join('\n');
+}
+
+function buildTranslationPrompt(text: string, targetLanguageLabel: string): string {
+  return [
+    'You translate WhatsApp chat drafts for customer communication.',
+    'Return exactly one JSON object with the key "translated".',
+    `Translate the message into ${targetLanguageLabel}.`,
+    'Rules:',
+    '- Preserve names, phone numbers, URLs, dates, currencies, amounts, order IDs, and placeholders exactly.',
+    '- Preserve the original meaning and tone.',
+    '- Keep the output natural and ready to send in chat.',
+    '- Do not add explanation, notes, or markdown fences.',
     '',
     'User draft:',
     text,
@@ -114,7 +149,7 @@ function stripMarkdownFence(value: string): string {
     .trim();
 }
 
-function parseRewriteResponse(rawText: string): Pick<RewriteMessageResult, 'professional' | 'alternative'> {
+function parseRewriteResponse(rawText: string): AssistMessageResult['rewrite'] {
   const cleaned = stripMarkdownFence(rawText);
   const jsonCandidate = cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
 
@@ -145,13 +180,45 @@ function parseRewriteResponse(rawText: string): Pick<RewriteMessageResult, 'prof
   };
 }
 
+function parseTranslationResponse(
+  rawText: string,
+  targetLanguage: TranslationLanguageCode
+): AssistMessageResult['translation'] {
+  const cleaned = stripMarkdownFence(rawText);
+  const jsonCandidate = cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonCandidate);
+  } catch {
+    throw new Error('Gemini returned an invalid translation payload');
+  }
+
+  const translatedSource =
+    (parsed as { translated?: unknown; translation?: unknown }).translated ??
+    (parsed as { translation?: unknown }).translation;
+  const translated = typeof translatedSource === 'string' ? translatedSource.trim() : '';
+
+  if (!translated) {
+    throw new Error('Gemini response is missing translated text');
+  }
+
+  return {
+    translated,
+    targetLanguage,
+    targetLanguageLabel: getTargetLanguageLabel(targetLanguage),
+  };
+}
+
 export async function rewriteMessageWithGemini(
-  input: RewriteMessageInput
-): Promise<RewriteMessageResult> {
+  input: AssistMessageInput
+): Promise<AssistMessageResult> {
   const apiKey = getGeminiApiKey();
   const model = getGeminiModel();
   const baseUrl = getGeminiBaseUrl();
   const timeoutMs = getTimeoutMs();
+  const targetLanguage = input.targetLanguage || 'en';
+  const targetLanguageLabel = getTargetLanguageLabel(targetLanguage);
 
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
   const requestBody = {
@@ -160,14 +227,17 @@ export async function rewriteMessageWithGemini(
         role: 'user',
         parts: [
           {
-            text: buildPrompt(input.text),
+            text:
+              input.mode === 'translate'
+                ? buildTranslationPrompt(input.text, targetLanguageLabel)
+                : buildRewritePrompt(input.text),
           },
         ],
       },
     ],
     generationConfig: {
       responseMimeType: 'application/json',
-      temperature: getTemperature(),
+      temperature: getTemperature(input.mode),
       topP: getTopP(),
       maxOutputTokens: getMaxOutputTokens(),
       candidateCount: 1,
@@ -178,6 +248,8 @@ export async function rewriteMessageWithGemini(
     userId: input.userId,
     conversationId: input.conversationId || null,
     model,
+    mode: input.mode,
+    targetLanguage: input.mode === 'translate' ? targetLanguage : null,
     inputLength: input.text.length,
   });
 
@@ -204,6 +276,7 @@ export async function rewriteMessageWithGemini(
       userId: input.userId,
       conversationId: input.conversationId || null,
       model,
+      mode: input.mode,
       status: response.status,
       error: errorMessage,
     });
@@ -216,10 +289,17 @@ export async function rewriteMessageWithGemini(
     throw new Error('Gemini returned an empty response');
   }
 
-  const rewrites = parseRewriteResponse(rawText);
+  if (input.mode === 'translate') {
+    return {
+      mode: 'translate',
+      model,
+      translation: parseTranslationResponse(rawText, targetLanguage),
+    };
+  }
 
   return {
-    ...rewrites,
+    mode: 'rewrite',
     model,
+    rewrite: parseRewriteResponse(rawText),
   };
 }

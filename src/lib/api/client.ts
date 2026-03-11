@@ -31,7 +31,7 @@ import type {
   UpdateConversationNotesResponse,
   UpdateConversationProfileImageResponse,
 } from '@/lib/types/chat';
-import type { RewriteMessageRequest, RewriteMessageResponse } from '@/lib/types/ai';
+import type { AssistMessageRequest, AssistMessageResponse } from '@/lib/types/ai';
 
 const API_BASE = '/api';
 
@@ -232,9 +232,9 @@ export async function fetchMessageInfo(
   return response.json();
 }
 
-export async function rewriteMessageDraft(
-  payload: RewriteMessageRequest
-): Promise<RewriteMessageResponse> {
+export async function assistMessageDraft(
+  payload: AssistMessageRequest
+): Promise<AssistMessageResponse> {
   const response = await fetch(`${API_BASE}/ai/rewrite`, {
     method: 'POST',
     headers: getHeaders(),
