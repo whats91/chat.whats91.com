@@ -14,6 +14,7 @@ import {
 } from '@/lib/types/ai';
 import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
 import { rewriteMessageWithGemini } from '@/server/ai/gemini-rewrite';
+import { GeminiAssistError, createInvalidRequestError, normalizeGeminiFetchError } from '@/server/ai/gemini-error';
 import { Logger } from '@/lib/logger';
 
 const log = new Logger('AIRoute');
@@ -33,33 +34,15 @@ export async function POST(request: NextRequest) {
     const targetLanguage = body?.targetLanguage || 'en';
 
     if (!text) {
-      return NextResponse.json<AssistMessageResponse>(
-        {
-          success: false,
-          message: 'Message text is required',
-        },
-        { status: 400 }
-      );
+      throw createInvalidRequestError('Message text is required');
     }
 
     if (text.length > 4000) {
-      return NextResponse.json<AssistMessageResponse>(
-        {
-          success: false,
-          message: 'Message text is too long to process',
-        },
-        { status: 400 }
-      );
+      throw createInvalidRequestError('Message text is too long to process');
     }
 
     if (mode === 'translate' && !VALID_TRANSLATION_CODES.has(targetLanguage)) {
-      return NextResponse.json<AssistMessageResponse>(
-        {
-          success: false,
-          message: 'Unsupported translation language',
-        },
-        { status: 400 }
-      );
+      throw createInvalidRequestError('Unsupported translation language');
     }
 
     const data = await rewriteMessageWithGemini({
@@ -79,16 +62,22 @@ export async function POST(request: NextRequest) {
       data,
     });
   } catch (error) {
+    const normalizedError =
+      error instanceof GeminiAssistError ? error : normalizeGeminiFetchError(error);
+
     log.error('POST /api/ai/rewrite error', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      errorCode: normalizedError.code,
+      error: normalizedError.providerMessage || normalizedError.userMessage,
     });
 
     return NextResponse.json<AssistMessageResponse>(
       {
         success: false,
-        message: error instanceof Error ? error.message : 'Unable to process the AI request',
+        message: normalizedError.userMessage,
+        errorCode: normalizedError.code,
+        retryable: normalizedError.retryable,
       },
-      { status: 500 }
+      { status: normalizedError.statusCode }
     );
   }
 }

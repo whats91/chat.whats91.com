@@ -61,8 +61,36 @@ export interface AssistMessageResult {
   translation?: TranslationMessageResult;
 }
 
+export type AssistMessageErrorCode =
+  | 'quota_rpm'
+  | 'quota_tpm'
+  | 'quota_rpd'
+  | 'invalid_request'
+  | 'billing_required'
+  | 'permission_denied'
+  | 'resource_not_found'
+  | 'service_unavailable'
+  | 'service_timeout'
+  | 'service_internal'
+  | 'prompt_blocked_safety'
+  | 'prompt_blocked_policy'
+  | 'prompt_blocked_other'
+  | 'candidate_max_tokens'
+  | 'candidate_safety'
+  | 'candidate_language'
+  | 'candidate_recitation'
+  | 'candidate_spii'
+  | 'candidate_policy'
+  | 'candidate_other'
+  | 'api_key_blocked'
+  | 'invalid_model_output'
+  | 'empty_model_response'
+  | 'unknown_ai_error';
+
 export interface AssistMessageResponse {
   success: boolean;
   message: string;
   data?: AssistMessageResult;
+  errorCode?: AssistMessageErrorCode;
+  retryable?: boolean;
 }

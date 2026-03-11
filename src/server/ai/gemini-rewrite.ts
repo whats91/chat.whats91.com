@@ -13,6 +13,14 @@ import {
   type MessageAssistMode,
   type TranslationLanguageCode,
 } from '@/lib/types/ai';
+import {
+  createEmptyResponseError,
+  createInvalidModelOutputError,
+  normalizeGeminiFetchError,
+  normalizeGeminiFinishReason,
+  normalizeGeminiHttpError,
+  normalizeGeminiPromptBlock,
+} from '@/server/ai/gemini-error';
 
 const log = new Logger('GeminiRewrite');
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
@@ -41,6 +49,8 @@ interface GeminiGenerateContentResponse {
   };
   error?: {
     message?: string;
+    status?: string;
+    details?: unknown[];
   };
 }
 
@@ -157,7 +167,7 @@ function parseRewriteResponse(rawText: string): AssistMessageResult['rewrite'] {
   try {
     parsed = JSON.parse(jsonCandidate);
   } catch {
-    throw new Error('Gemini returned an invalid rewrite payload');
+    throw createInvalidModelOutputError('Gemini returned an invalid rewrite payload');
   }
 
   const professional =
@@ -171,7 +181,7 @@ function parseRewriteResponse(rawText: string): AssistMessageResult['rewrite'] {
   const alternative = typeof alternativeSource === 'string' ? alternativeSource.trim() : '';
 
   if (!professional || !alternative) {
-    throw new Error('Gemini response is missing rewrite variants');
+    throw createInvalidModelOutputError('Gemini response is missing rewrite variants');
   }
 
   return {
@@ -191,7 +201,7 @@ function parseTranslationResponse(
   try {
     parsed = JSON.parse(jsonCandidate);
   } catch {
-    throw new Error('Gemini returned an invalid translation payload');
+    throw createInvalidModelOutputError('Gemini returned an invalid translation payload');
   }
 
   const translatedSource =
@@ -200,7 +210,7 @@ function parseTranslationResponse(
   const translated = typeof translatedSource === 'string' ? translatedSource.trim() : '';
 
   if (!translated) {
-    throw new Error('Gemini response is missing translated text');
+    throw createInvalidModelOutputError('Gemini response is missing translated text');
   }
 
   return {
@@ -253,53 +263,77 @@ export async function rewriteMessageWithGemini(
     inputLength: input.text.length,
   });
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    body: JSON.stringify(requestBody),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify(requestBody),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
 
-  const payload = (await response.json().catch(() => null)) as GeminiGenerateContentResponse | null;
+    const payload = (await response.json().catch(() => null)) as GeminiGenerateContentResponse | null;
 
-  if (!response.ok) {
-    const errorMessage =
-      payload?.error?.message ||
-      payload?.promptFeedback?.blockReason ||
-      `Gemini request failed with status ${response.status}`;
+    if (!response.ok) {
+      const normalizedError = normalizeGeminiHttpError(response.status, payload?.error || null);
 
-    log.error('Gemini rewrite request failed', {
+      log.error('Gemini rewrite request failed', {
+        userId: input.userId,
+        conversationId: input.conversationId || null,
+        model,
+        mode: input.mode,
+        status: response.status,
+        errorCode: normalizedError.code,
+        error: normalizedError.providerMessage || normalizedError.userMessage,
+      });
+
+      throw normalizedError;
+    }
+
+    const promptBlock = normalizeGeminiPromptBlock(payload?.promptFeedback);
+    if (promptBlock) {
+      throw promptBlock;
+    }
+
+    const finishReason = payload?.candidates?.[0]?.finishReason;
+    const finishReasonError = normalizeGeminiFinishReason(finishReason);
+    if (finishReasonError) {
+      throw finishReasonError;
+    }
+
+    const rawText = payload ? extractCandidateText(payload) : '';
+    if (!rawText) {
+      throw createEmptyResponseError();
+    }
+
+    if (input.mode === 'translate') {
+      return {
+        mode: 'translate',
+        model,
+        translation: parseTranslationResponse(rawText, targetLanguage),
+      };
+    }
+
+    return {
+      mode: 'rewrite',
+      model,
+      rewrite: parseRewriteResponse(rawText),
+    };
+  } catch (error) {
+    const normalizedError = normalizeGeminiFetchError(error);
+
+    log.error('Gemini assist failed', {
       userId: input.userId,
       conversationId: input.conversationId || null,
       model,
       mode: input.mode,
-      status: response.status,
-      error: errorMessage,
+      errorCode: normalizedError.code,
+      error: normalizedError.providerMessage || normalizedError.userMessage,
     });
 
-    throw new Error(errorMessage);
+    throw normalizedError;
   }
-
-  const rawText = payload ? extractCandidateText(payload) : '';
-  if (!rawText) {
-    throw new Error('Gemini returned an empty response');
-  }
-
-  if (input.mode === 'translate') {
-    return {
-      mode: 'translate',
-      model,
-      translation: parseTranslationResponse(rawText, targetLanguage),
-    };
-  }
-
-  return {
-    mode: 'rewrite',
-    model,
-    rewrite: parseRewriteResponse(rawText),
-  };
 }
