@@ -6,6 +6,7 @@
 // - src/stores/chatStore.ts
 // - src/lib/api/client.ts
 // - src/lib/types/chat.ts
+// - src/lib/types/team-member.ts
 // - src/server/controllers/conversation-controller.ts
 // - src/server/db/chat-labels.ts
 
@@ -20,10 +21,23 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
+import {
+  fetchConversationAssignment,
+  fetchTeamMembers,
+  updateConversationAssignment,
+} from '@/lib/api/client';
+import type { TeamMember } from '@/lib/types/team-member';
 import {
   Star,
   Bell,
@@ -37,6 +51,7 @@ import {
   Image as ImageIcon,
   PencilLine,
   Upload,
+  UserCheck,
 } from 'lucide-react';
 
 interface RightInfoPanelProps {
@@ -66,6 +81,10 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   const [isNotesDirty, setIsNotesDirty] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [isUploadingProfileImage, setIsUploadingProfileImage] = useState(false);
+  const [availableTeamMembers, setAvailableTeamMembers] = useState<TeamMember[]>([]);
+  const [assignedTeamMemberId, setAssignedTeamMemberId] = useState('unassigned');
+  const [isAssignmentLoading, setIsAssignmentLoading] = useState(false);
+  const [isAssignmentSaving, setIsAssignmentSaving] = useState(false);
 
   useEffect(() => {
     if (conversation && !isEditingName) {
@@ -85,6 +104,56 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
       setNotesDraft(conversation.conversationNotes || '');
     }
   }, [conversation?.conversationNotes, isNotesDirty]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAssignmentState = async () => {
+      try {
+        setIsAssignmentLoading(true);
+
+        const [teamMembersResponse, assignmentResponse] = await Promise.all([
+          fetchTeamMembers(),
+          fetchConversationAssignment(conversationId),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!teamMembersResponse.success || !teamMembersResponse.data) {
+          throw new Error(teamMembersResponse.message || 'Unable to load team members');
+        }
+
+        if (!assignmentResponse.success) {
+          throw new Error(assignmentResponse.message || 'Unable to load conversation assignment');
+        }
+
+        setAvailableTeamMembers(teamMembersResponse.data.teamMembers || []);
+        setAssignedTeamMemberId(assignmentResponse.data?.assignedTeamMember?.id || 'unassigned');
+      } catch (error) {
+        if (!cancelled) {
+          setAvailableTeamMembers([]);
+          setAssignedTeamMemberId('unassigned');
+          toast({
+            title: 'Unable to load assignment data',
+            description: error instanceof Error ? error.message : 'Please try again.',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAssignmentLoading(false);
+        }
+      }
+    };
+
+    void loadAssignmentState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   if (!conversation) {
     return null;
@@ -192,6 +261,38 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
       });
     } finally {
       setIsUploadingProfileImage(false);
+    }
+  };
+
+  const handleAssignmentChange = async (value: string) => {
+    const previousValue = assignedTeamMemberId;
+    const nextTeamMemberId = value === 'unassigned' ? null : value;
+
+    try {
+      setAssignedTeamMemberId(value);
+      setIsAssignmentSaving(true);
+
+      const response = await updateConversationAssignment(conversation.id, nextTeamMemberId);
+      if (!response.success) {
+        throw new Error(response.message || 'Unable to update conversation assignment');
+      }
+
+      setAssignedTeamMemberId(response.data?.assignedTeamMember?.id || 'unassigned');
+      toast({
+        title: nextTeamMemberId ? 'Conversation assigned' : 'Assignment cleared',
+        description: nextTeamMemberId
+          ? 'This chat has been assigned directly to a team member.'
+          : 'This chat is no longer assigned directly.',
+      });
+    } catch (error) {
+      setAssignedTeamMemberId(previousValue);
+      toast({
+        title: 'Unable to update assignment',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAssignmentSaving(false);
     }
   };
   
@@ -365,6 +466,48 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
             <Separator />
           </>
         )}
+
+        <div className="p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium">Assigned teammate</h3>
+            {isAssignmentSaving ? (
+              <span className="text-xs text-muted-foreground">Saving...</span>
+            ) : null}
+          </div>
+          <Select
+            value={assignedTeamMemberId}
+            onValueChange={(value) => {
+              void handleAssignmentChange(value);
+            }}
+            disabled={isAssignmentLoading || isAssignmentSaving}
+          >
+            <SelectTrigger className="bg-background/85">
+              <SelectValue
+                placeholder={
+                  isAssignmentLoading ? 'Loading team members...' : 'Assign a team member'
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+              {availableTeamMembers.map((teamMember) => (
+                <SelectItem key={teamMember.id} value={teamMember.id}>
+                  {teamMember.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Direct assignment stays with this chat even if label-based assignment is different.
+          </p>
+          {availableTeamMembers.length === 0 && !isAssignmentLoading ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Add team members in Settings before assigning chats here.
+            </p>
+          ) : null}
+        </div>
+
+        <Separator />
         
         {/* Media & Links */}
         <div className="p-4">
@@ -422,6 +565,11 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
             label="Labels"
             count={conversationLabels.length}
             onClick={() => setIsLabelsDialogOpen(true)}
+          />
+          <QuickLink
+            icon={UserCheck}
+            label="Assignment"
+            count={assignedTeamMemberId !== 'unassigned' ? 1 : 0}
           />
         </div>
         

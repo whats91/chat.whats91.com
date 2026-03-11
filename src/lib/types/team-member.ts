@@ -10,6 +10,8 @@
  * - src/app/settings/page.tsx
  */
 
+import type { ChatLabel } from '@/lib/types/chat';
+
 export interface TeamMember {
   id: string;
   uid: string;
@@ -17,6 +19,7 @@ export interface TeamMember {
   name: string;
   email: string | null;
   mobileNumber: string | null;
+  assignedLabels: ChatLabel[];
   createdAt: string;
   updatedAt: string;
 }
@@ -40,5 +43,13 @@ export interface TeamMemberMutationResponse {
   message?: string;
   data?: {
     teamMember: TeamMember;
+  };
+}
+
+export interface ConversationTeamAssignmentResponse {
+  success: boolean;
+  message?: string;
+  data?: {
+    assignedTeamMember: TeamMember | null;
   };
 }

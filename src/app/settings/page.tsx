@@ -46,8 +46,10 @@ import { useNotifications } from '@/hooks/use-notifications';
 import {
   createTeamMember as createTeamMemberRequest,
   deleteTeamMember as deleteTeamMemberRequest,
+  fetchChatLabels,
   fetchTeamMembers,
   updateTeamMember as updateTeamMemberRequest,
+  updateTeamMemberLabels as updateTeamMemberLabelsRequest,
 } from '@/lib/api/client';
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
@@ -57,7 +59,9 @@ import {
 } from '@/lib/notifications/preferences';
 import { showPermissionGrantedNotification } from '@/lib/notifications/service';
 import type { TeamMember } from '@/lib/types/team-member';
+import type { ChatLabel } from '@/lib/types/chat';
 import { toast } from '@/hooks/use-toast';
+import { TeamMemberLabelAccessDialog } from '@/components/settings/TeamMemberLabelAccessDialog';
 
 type ThemePreference = 'light' | 'dark' | 'system';
 
@@ -121,11 +125,15 @@ export default function SettingsPage() {
     DEFAULT_NOTIFICATION_PREFERENCES
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [availableLabels, setAvailableLabels] = useState<ChatLabel[]>([]);
   const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(true);
+  const [isLabelsLoading, setIsLabelsLoading] = useState(true);
   const [isCreatingTeamMember, setIsCreatingTeamMember] = useState(false);
   const [editingTeamMemberId, setEditingTeamMemberId] = useState<string | null>(null);
   const [isUpdatingTeamMember, setIsUpdatingTeamMember] = useState(false);
+  const [isUpdatingTeamMemberLabels, setIsUpdatingTeamMemberLabels] = useState(false);
   const [deletingTeamMemberId, setDeletingTeamMemberId] = useState<string | null>(null);
+  const [labelAccessTeamMember, setLabelAccessTeamMember] = useState<TeamMember | null>(null);
   const [createForm, setCreateForm] = useState<TeamMemberFormState>(EMPTY_TEAM_MEMBER_FORM);
   const [editForm, setEditForm] = useState<TeamMemberFormState>(EMPTY_TEAM_MEMBER_FORM);
 
@@ -150,11 +158,33 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const loadAvailableLabels = useCallback(async () => {
+    setIsLabelsLoading(true);
+
+    try {
+      const response = await fetchChatLabels();
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Unable to load labels');
+      }
+
+      setAvailableLabels(response.data.labels || []);
+    } catch (error) {
+      toast({
+        title: 'Unable to load labels',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLabelsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setPreferences(getNotificationPreferences());
     setIsThemeReady(true);
     void loadTeamMembers();
-  }, [loadTeamMembers]);
+    void loadAvailableLabels();
+  }, [loadAvailableLabels, loadTeamMembers]);
 
   const handlePreferenceChange = (
     key: keyof NotificationPreferences,
@@ -294,6 +324,41 @@ export default function SettingsPage() {
       });
     } finally {
       setDeletingTeamMemberId(null);
+    }
+  };
+
+  const handleSaveTeamMemberLabels = async (labelIds: string[]) => {
+    if (!labelAccessTeamMember) {
+      return;
+    }
+
+    try {
+      setIsUpdatingTeamMemberLabels(true);
+      const response = await updateTeamMemberLabelsRequest(labelAccessTeamMember.id, labelIds);
+
+      if (!response.success || !response.data?.teamMember) {
+        throw new Error(response.message || 'Unable to update label access');
+      }
+
+      const updatedTeamMember = response.data.teamMember;
+      setTeamMembers((current) =>
+        current.map((teamMember) =>
+          teamMember.id === updatedTeamMember.id ? updatedTeamMember : teamMember
+        )
+      );
+      setLabelAccessTeamMember(null);
+      toast({
+        title: 'Label access updated',
+        description: `${updatedTeamMember.name} can now work on ${updatedTeamMember.assignedLabels.length} label${updatedTeamMember.assignedLabels.length === 1 ? '' : 's'}.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Unable to update label access',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdatingTeamMemberLabels(false);
     }
   };
 
@@ -559,11 +624,36 @@ export default function SettingsPage() {
                                   </div>
                                 </div>
                               </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {teamMember.assignedLabels.length > 0 ? (
+                                  teamMember.assignedLabels.map((label) => (
+                                    <Badge key={label.id} variant="outline" className="gap-1">
+                                      <span
+                                        className="h-2 w-2 rounded-full"
+                                        style={{ backgroundColor: label.color }}
+                                      />
+                                      {label.name}
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">
+                                    No label access assigned yet.
+                                  </span>
+                                )}
+                              </div>
                               <div className="mt-3 text-xs text-muted-foreground">
                                 Added {formatTeamMemberDate(teamMember.createdAt)} • Updated {formatTeamMemberDate(teamMember.updatedAt)}
                               </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setLabelAccessTeamMember(teamMember)}
+                              >
+                                Label access
+                              </Button>
                               <Button
                                 type="button"
                                 variant="outline"
@@ -601,7 +691,7 @@ export default function SettingsPage() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
+        </TabsContent>
 
           <TabsContent value="appearance" className="space-y-6">
             <Card>
@@ -942,8 +1032,22 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+        </TabsContent>
+      </Tabs>
+
+      <TeamMemberLabelAccessDialog
+        open={labelAccessTeamMember !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLabelAccessTeamMember(null);
+          }
+        }}
+        teamMember={labelAccessTeamMember}
+        availableLabels={availableLabels}
+        isLoadingLabels={isLabelsLoading}
+        isSaving={isUpdatingTeamMemberLabels}
+        onSave={handleSaveTeamMemberLabels}
+      />
       </div>
     </div>
   );

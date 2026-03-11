@@ -68,6 +68,7 @@ model Conversation {
   // Relations
   messages              ConversationMessage[]
   labels                ConversationLabel[]
+  teamAssignment        ConversationTeamAssignment?
 
   @@index([userId, contactPhone])
   @@index([userId, lastMessageAt])
@@ -89,6 +90,22 @@ model ConversationLabel {
   @@index([conversationId], map: "idx_conversation_labels_conversation_id")
   @@index([labelId], map: "idx_conversation_labels_label_id")
   @@map("conversation_labels")
+}
+
+model ConversationTeamAssignment {
+  id             BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+  userId         BigInt       @map("user_id") @db.UnsignedBigInt
+  conversationId Int          @map("conversation_id")
+  teamMemberId   BigInt       @map("team_member_id") @db.UnsignedBigInt
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId], map: "uniq_conversation_team_assignments_conversation_id")
+  @@index([userId], map: "idx_conversation_team_assignments_user_id")
+  @@index([teamMemberId], map: "idx_conversation_team_assignments_team_member_id")
+  @@map("conversation_team_assignments")
 }
 
 // ========================================

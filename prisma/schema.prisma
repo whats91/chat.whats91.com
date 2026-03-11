@@ -212,6 +212,19 @@ model TeamMember {
   @@map("team_members")
 }
 
+model TeamMemberLabelAssignment {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  teamMemberId BigInt   @map("team_member_id") @db.UnsignedBigInt
+  labelId      BigInt   @map("label_id") @db.UnsignedBigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  @@unique([teamMemberId, labelId], map: "uniq_team_member_label_assignments_member_label")
+  @@index([teamMemberId], map: "idx_team_member_label_assignments_team_member_id")
+  @@index([labelId], map: "idx_team_member_label_assignments_label_id")
+  @@map("team_member_label_assignments")
+}
+
 // ========================================
 // CONVERSATION MODEL
 // ========================================
@@ -248,10 +261,27 @@ model Conversation {
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   messages              ConversationMessage[]
+  teamAssignment        ConversationTeamAssignment?
 
   @@index([userId, contactPhone])
   @@index([userId, lastMessageAt])
   @@map("conversations")
+}
+
+model ConversationTeamAssignment {
+  id             BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+  userId         BigInt       @map("user_id") @db.UnsignedBigInt
+  conversationId Int          @map("conversation_id")
+  teamMemberId   BigInt       @map("team_member_id") @db.UnsignedBigInt
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId], map: "uniq_conversation_team_assignments_conversation_id")
+  @@index([userId], map: "idx_conversation_team_assignments_user_id")
+  @@index([teamMemberId], map: "idx_conversation_team_assignments_team_member_id")
+  @@map("conversation_team_assignments")
 }
 
 // ========================================

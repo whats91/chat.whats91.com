@@ -100,6 +100,15 @@ export interface ConversationLabel {
   updatedAt: Date;
 }
 
+export interface ConversationTeamAssignment {
+  id: number;
+  userId: bigint;
+  conversationId: number;
+  teamMemberId: bigint;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 function parseDatabaseName(url: string): string {
   try {
     const parsed = new URL(url);

@@ -33,6 +33,7 @@ import type {
 } from '@/lib/types/chat';
 import type { AssistMessageRequest, AssistMessageResponse } from '@/lib/types/ai';
 import type {
+  ConversationTeamAssignmentResponse,
   TeamMemberInput,
   TeamMemberMutationResponse,
   TeamMembersResponse,
@@ -179,12 +180,49 @@ export async function updateTeamMember(
   return response.json();
 }
 
+export async function updateTeamMemberLabels(
+  teamMemberId: string,
+  labelIds: string[]
+): Promise<TeamMemberMutationResponse> {
+  const response = await fetch(`${API_BASE}/team-members/${teamMemberId}/labels`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ labelIds }),
+  });
+
+  return response.json();
+}
+
 export async function deleteTeamMember(
   teamMemberId: string
 ): Promise<{ success: boolean; message?: string }> {
   const response = await fetch(`${API_BASE}/team-members/${teamMemberId}`, {
     method: 'DELETE',
     headers: getHeaders(),
+  });
+
+  return response.json();
+}
+
+export async function fetchConversationAssignment(
+  conversationId: string | number
+): Promise<ConversationTeamAssignmentResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/assignment`, {
+    headers: getHeaders(),
+    cache: 'no-store',
+  });
+
+  return response.json();
+}
+
+export async function updateConversationAssignment(
+  conversationId: string | number,
+  teamMemberId: string | null
+): Promise<ConversationTeamAssignmentResponse> {
+  const response = await fetch(`${API_BASE}/conversations/${conversationId}/assignment`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ teamMemberId }),
   });
 
   return response.json();
@@ -576,9 +614,17 @@ export async function sendVoiceNote(
 
 // API client object for convenience
 export const api = {
+  teamMembers: {
+    list: fetchTeamMembers,
+    create: createTeamMember,
+    update: updateTeamMember,
+    updateLabels: updateTeamMemberLabels,
+    delete: deleteTeamMember,
+  },
   conversations: {
     list: fetchConversations,
     get: fetchConversation,
+    getAssignment: fetchConversationAssignment,
     getPinnedMessage: fetchPinnedMessage,
     getStarredMessages: fetchStarredMessages,
     getConversationMedia: fetchConversationMedia,
@@ -594,6 +640,7 @@ export const api = {
     togglePin,
     updateConversationName,
     updateConversationNotes,
+    updateConversationAssignment,
     uploadConversationProfileImage,
     fetchConversationLabels,
     fetchChatLabels,
