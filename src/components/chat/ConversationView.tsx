@@ -484,8 +484,11 @@ export function ConversationView({
   }
   
   return (
-    <div ref={conversationRootRef} className="chat-canvas flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <div className="sticky top-0 z-30 shrink-0">
+    <div
+      ref={conversationRootRef}
+      className="chat-canvas relative isolate flex h-full min-h-0 flex-col overflow-hidden overscroll-none bg-background"
+    >
+      <div className="sticky top-0 z-40 shrink-0 bg-background/95 backdrop-blur supports-[padding:max(0px)]:pt-[env(safe-area-inset-top)]">
         <ConversationHeader
           conversation={conversation}
           onBack={onBack}
@@ -982,7 +985,7 @@ function MessageList({
   );
   
   return (
-    <ScrollArea ref={scrollRef} className="h-full p-4">
+    <ScrollArea ref={scrollRef} className="h-full min-h-0 p-4">
       <div className="space-y-4">
         {groupedMessages.map((group, groupIndex) => (
           <div key={groupIndex}>
@@ -1265,8 +1268,11 @@ function MessageComposer({
   serviceWindowExpiresAt,
   onSend,
 }: MessageComposerProps) {
-  const { loadConversations, loadMessages } = useChatStore();
-  const [message, setMessage] = useState('');
+  const loadConversations = useChatStore((state) => state.loadConversations);
+  const loadMessages = useChatStore((state) => state.loadMessages);
+  const message = useChatStore((state) => state.messageDraftsByConversation[conversationId] || '');
+  const setConversationDraft = useChatStore((state) => state.setConversationDraft);
+  const clearConversationDraft = useChatStore((state) => state.clearConversationDraft);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [isMobileUtilityTrayOpen, setIsMobileUtilityTrayOpen] = useState(false);
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
@@ -1278,7 +1284,7 @@ function MessageComposer({
   const handleSend = () => {
     if (!isBlocked && message.trim()) {
       onSend(message.trim());
-      setMessage('');
+      clearConversationDraft(conversationId);
     }
   };
   
@@ -1298,7 +1304,7 @@ function MessageComposer({
     const selectionEnd = input?.selectionEnd ?? message.length;
 
     const nextMessage = `${message.slice(0, selectionStart)}${emoji}${message.slice(selectionEnd)}`;
-    setMessage(nextMessage);
+    setConversationDraft(conversationId, nextMessage);
 
     requestAnimationFrame(() => {
       const cursorPosition = selectionStart + emoji.length;
@@ -1318,7 +1324,7 @@ function MessageComposer({
   };
 
   const applyRewrite = (value: string) => {
-    setMessage(value);
+    setConversationDraft(conversationId, value);
     requestAnimationFrame(() => {
       const input =
         typeof window !== 'undefined' && window.innerWidth < 768
@@ -1365,7 +1371,7 @@ function MessageComposer({
         throw new Error(sendResponse.message || 'Unable to send the selected file');
       }
 
-      setMessage('');
+      clearConversationDraft(conversationId);
       await reloadConversationState();
     } catch (error) {
       toast({
@@ -1390,7 +1396,6 @@ function MessageComposer({
   };
 
   useEffect(() => {
-    setMessage('');
     setIsMobileUtilityTrayOpen(false);
   }, [conversationId]);
   
@@ -1481,7 +1486,7 @@ function MessageComposer({
                 <Input
                   ref={mobileMessageInputRef}
                   value={message}
-                  onChange={(e) => setMessage(e.target.value)}
+                  onChange={(e) => setConversationDraft(conversationId, e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
                   disabled={isBlocked || isUploadingAttachment}
@@ -1546,7 +1551,7 @@ function MessageComposer({
               <Input
                 ref={desktopMessageInputRef}
                 value={message}
-                onChange={(e) => setMessage(e.target.value)}
+                onChange={(e) => setConversationDraft(conversationId, e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
                 disabled={isBlocked || isUploadingAttachment}

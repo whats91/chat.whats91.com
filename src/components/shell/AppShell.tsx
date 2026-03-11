@@ -638,6 +638,8 @@ export function AppShell() {
           toggleNewChatModal();
         } else if (isRightPanelOpen) {
           useChatStore.getState().toggleRightPanel();
+        } else if (selectedConversationId) {
+          selectConversation(null);
         }
         return;
       }
@@ -828,7 +830,7 @@ export function AppShell() {
   
   return (
     <>
-      <div className="h-screen flex overflow-hidden">
+      <div className="flex h-dvh min-h-0 w-full overflow-hidden overscroll-none">
         {isMobile ? (
           <MobileShell />
         ) : (
@@ -983,7 +985,7 @@ function MobileShell() {
   };
   
   return selectedConversationId ? (
-    <div className="flex-1 h-full flex flex-col overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <ConversationView
         conversationId={selectedConversationId}
         onBack={handleBack}
@@ -991,7 +993,7 @@ function MobileShell() {
       />
     </div>
   ) : (
-    <div className="flex-1 h-full">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <ChatList />
     </div>
   );

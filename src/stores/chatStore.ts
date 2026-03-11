@@ -361,6 +361,7 @@ interface ChatState {
   
   // Messages
   messagesByConversation: Map<string, Message[]>;
+  messageDraftsByConversation: Record<string, string>;
   isLoadingMessages: boolean;
   messagesError: string | null;
   hasMoreMessages: boolean;
@@ -387,6 +388,8 @@ interface ChatState {
   toggleRightPanel: () => void;
   toggleNewChatModal: () => void;
   setSearchFocused: (focused: boolean) => void;
+  setConversationDraft: (conversationId: string, draft: string) => void;
+  clearConversationDraft: (conversationId: string) => void;
   setSocketConnected: (connected: boolean) => void;
   setConversationTyping: (data: {
     conversationId: string;
@@ -441,6 +444,7 @@ export const useChatStore = create<ChatState>()(
       hasMoreConversations: false,
       conversationListQuery: DEFAULT_CONVERSATION_LIST_QUERY,
       messagesByConversation: new Map(),
+      messageDraftsByConversation: {},
       isLoadingMessages: false,
       messagesError: null,
       hasMoreMessages: false,
@@ -718,6 +722,26 @@ export const useChatStore = create<ChatState>()(
       toggleRightPanel: () => set((state) => ({ isRightPanelOpen: !state.isRightPanelOpen })),
       toggleNewChatModal: () => set((state) => ({ isNewChatModalOpen: !state.isNewChatModalOpen })),
       setSearchFocused: (focused) => set({ isSearchFocused: focused }),
+      setConversationDraft: (conversationId, draft) =>
+        set((state) => ({
+          messageDraftsByConversation: {
+            ...state.messageDraftsByConversation,
+            [conversationId]: draft,
+          },
+        })),
+      clearConversationDraft: (conversationId) =>
+        set((state) => {
+          if (!Object.prototype.hasOwnProperty.call(state.messageDraftsByConversation, conversationId)) {
+            return state;
+          }
+
+          const nextDrafts = { ...state.messageDraftsByConversation };
+          delete nextDrafts[conversationId];
+
+          return {
+            messageDraftsByConversation: nextDrafts,
+          };
+        }),
       setSocketConnected: (connected) => set({ isSocketConnected: connected }),
       setConversationTyping: ({ conversationId, isTyping, userId, contactPhone, contactName }) => {
         set((state) => {
@@ -1436,6 +1460,7 @@ export const useChatStore = create<ChatState>()(
       name: 'whats91-chat-store',
       partialize: (state) => ({
         selectedConversationId: state.selectedConversationId,
+        messageDraftsByConversation: state.messageDraftsByConversation,
       }),
       onRehydrateStorage: () => (state) => {
         if (state?.selectedConversationId) {
