@@ -15,6 +15,7 @@ import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDi
 import { fetchCsrfToken, logout as logoutSession } from '@/lib/api/auth-client';
 import { exportAllConversationsToExcel, fetchChatLabels } from '@/lib/api/client';
 import { clearCurrentUserId } from '@/lib/config/current-user';
+import { useConversationAvatar } from '@/lib/avatar/fallback';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
@@ -568,7 +569,10 @@ function ChatListItem({
   const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
     ? rawParticipantName
     : participantPhone;
-  const participantAvatar = participant?.avatar;
+  const participantAvatar = useConversationAvatar(
+    conversation.profileImageUrl || participant?.avatar,
+    `${conversation.id}:${conversation.contactPhone || participant?.phone || participantName}`
+  );
   const participantStatus = participant?.status;
   const hasDedicatedContactName = Boolean(conversation.contactName?.trim());
   const assignedLabels = conversation.labels || [];

@@ -32,6 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
+import { useConversationAvatar } from '@/lib/avatar/fallback';
 import { fetchAuthSession } from '@/lib/api/auth-client';
 import {
   fetchConversationAssignment,
@@ -184,7 +185,10 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
     ? rawParticipantName
     : participantPhone;
-  const participantAvatar = conversation.profileImageUrl || participant?.avatar;
+  const participantAvatar = useConversationAvatar(
+    conversation.profileImageUrl || participant?.avatar,
+    `${conversation.id}:${conversation.contactPhone || participant?.phone || participantName}`
+  );
   const participantEmail = participant?.email;
   
   const initials = participantName

@@ -34,6 +34,7 @@ import {
   uploadMedia,
 } from '@/lib/api/client';
 import { getCurrentUserId } from '@/lib/config/current-user';
+import { useConversationAvatar } from '@/lib/avatar/fallback';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
 import { toast } from '@/hooks/use-toast';
 import { resolveMessageForRendering } from '@/lib/messages/resolve-message-for-rendering';
@@ -704,12 +705,15 @@ function ConversationHeader({
   onDeleteConversation,
 }: ConversationHeaderProps) {
   const { participant, typing } = conversation;
-  const participantAvatar = participant?.avatar;
   const participantPhone = formatChatPhoneNumber(participant?.phone || conversation.contactPhone);
   const rawParticipantName = conversation.contactName?.trim() || participant?.name?.trim() || '';
   const participantName = rawParticipantName && !/^\+?\d+$/.test(rawParticipantName)
     ? rawParticipantName
     : participantPhone;
+  const participantAvatar = useConversationAvatar(
+    conversation.profileImageUrl || participant?.avatar,
+    `${conversation.id}:${conversation.contactPhone || participant?.phone || participantName}`
+  );
   const participantStatus = participant?.status;
   const participantLastSeen = participant?.lastSeen;
   
