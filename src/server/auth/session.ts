@@ -97,6 +97,10 @@ function decodeSessionToken(token: string | undefined): AuthSessionPayload | nul
         phone: parsed.user.phone == null ? null : String(parsed.user.phone),
         username: parsed.user.username == null ? null : String(parsed.user.username),
         type: String(parsed.user.type || ''),
+        principalType:
+          parsed.user.principalType === 'team_member' ? 'team_member' : 'owner',
+        teamMemberId:
+          parsed.user.teamMemberId == null ? null : String(parsed.user.teamMemberId),
       },
     };
   } catch {

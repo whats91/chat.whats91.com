@@ -27,12 +27,32 @@ interface UserRow {
   type: string | null;
 }
 
+interface TeamMemberLoginRow {
+  id: string | number | bigint;
+  user_id: string | number | bigint;
+  name: string | null;
+  email: string | null;
+  mobile_number: string | null;
+  password: string | null;
+}
+
 interface AuthUserRecord extends AuthenticatedUser {
+  passwordHash: string | null;
+}
+
+interface TeamMemberAuthRecord {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
   passwordHash: string | null;
 }
 
 const NORMALIZED_PHONE_SQL =
   "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')";
+const NORMALIZED_TEAM_MEMBER_PHONE_SQL =
+  "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(mobile_number, ''), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')";
 
 function normalizePhoneForLookup(value: string): string {
   return value.replace(/\D/g, '');
@@ -51,6 +71,23 @@ function mapAuthUser(row: UserRow | undefined): AuthUserRecord | null {
     phone: row.phone == null ? null : String(row.phone),
     username: row.username == null ? null : String(row.username),
     type: String(row.type || ''),
+    principalType: 'owner',
+    teamMemberId: null,
+    passwordHash: row.password == null ? null : String(row.password),
+  };
+}
+
+function mapTeamMemberAuthRecord(row: TeamMemberLoginRow | undefined): TeamMemberAuthRecord | null {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    ownerUserId: String(row.user_id),
+    name: String(row.name || ''),
+    email: row.email == null ? null : String(row.email),
+    phone: row.mobile_number == null ? null : String(row.mobile_number),
     passwordHash: row.password == null ? null : String(row.password),
   };
 }
@@ -64,6 +101,25 @@ function sanitizeAuthenticatedUser(user: AuthUserRecord): AuthenticatedUser {
     phone: user.phone,
     username: user.username,
     type: user.type,
+    principalType: user.principalType,
+    teamMemberId: user.teamMemberId,
+  };
+}
+
+function sanitizeTeamMemberAuthenticatedUser(
+  teamMember: TeamMemberAuthRecord,
+  owner: AuthUserRecord
+): AuthenticatedUser {
+  return {
+    id: owner.id,
+    adminId: owner.adminId,
+    name: teamMember.name || owner.name,
+    email: teamMember.email,
+    phone: teamMember.phone,
+    username: teamMember.email,
+    type: 'team_member',
+    principalType: 'team_member',
+    teamMemberId: teamMember.id,
   };
 }
 
@@ -164,6 +220,40 @@ async function findUserByIdentifier(identifier: string): Promise<AuthUserRecord 
   return mapAuthUser(rows[0]);
 }
 
+async function findTeamMemberByIdentifier(identifier: string): Promise<TeamMemberAuthRecord | null> {
+  const normalizedPhone = normalizePhoneForLookup(identifier);
+  const tailPhone = normalizedPhone.length >= 10 ? normalizedPhone.slice(-10) : null;
+  const hasPhoneCandidate = normalizedPhone.length > 0;
+  const query = hasPhoneCandidate
+    ? `SELECT tm.id, tm.user_id, tm.name, tm.email, tm.mobile_number, tm.password
+       FROM team_members tm
+       INNER JOIN users u ON u.id = tm.user_id
+       WHERE u.status = 1
+         AND u.deleted_at IS NULL
+         AND (
+           LOWER(COALESCE(tm.email, '')) = LOWER(?)
+           OR ${NORMALIZED_TEAM_MEMBER_PHONE_SQL} = ?
+           OR (? IS NOT NULL AND RIGHT(${NORMALIZED_TEAM_MEMBER_PHONE_SQL}, 10) = ?)
+         )
+       ORDER BY tm.id DESC
+       LIMIT 1`
+    : `SELECT tm.id, tm.user_id, tm.name, tm.email, tm.mobile_number, tm.password
+       FROM team_members tm
+       INNER JOIN users u ON u.id = tm.user_id
+       WHERE u.status = 1
+         AND u.deleted_at IS NULL
+         AND LOWER(COALESCE(tm.email, '')) = LOWER(?)
+       ORDER BY tm.id DESC
+       LIMIT 1`;
+
+  const params = hasPhoneCandidate
+    ? [identifier, normalizedPhone, tailPhone, tailPhone]
+    : [identifier];
+  const rows = await db.$queryRawUnsafe<TeamMemberLoginRow[]>(query, ...params);
+
+  return mapTeamMemberAuthRecord(rows[0]);
+}
+
 async function findUserByAuthToken(authToken: string): Promise<AuthUserRecord | null> {
   const normalizedToken = authToken.trim();
   if (!normalizedToken) {
@@ -212,32 +302,55 @@ export async function authenticateWithPassword(
   | { success: true; user: AuthenticatedUser }
   | { success: false; message: string }
 > {
-  const user = await findUserByIdentifier(identifier.trim());
-  if (!user || !user.passwordHash) {
+  const normalizedIdentifier = identifier.trim();
+  const ownerUser = await findUserByIdentifier(normalizedIdentifier);
+  if (ownerUser?.passwordHash && (await comparePassword(password, ownerUser.passwordHash))) {
+    if (!(await ensureParentAccountIsActive(ownerUser))) {
+      return {
+        success: false,
+        message: 'No active partner account found for this user',
+      };
+    }
+
     return {
-      success: false,
-      message: 'Invalid username or password',
+      success: true,
+      user: sanitizeAuthenticatedUser(ownerUser),
     };
   }
 
-  if (!(await ensureParentAccountIsActive(user))) {
+  const teamMember = await findTeamMemberByIdentifier(normalizedIdentifier);
+  if (teamMember?.passwordHash && (await comparePassword(password, teamMember.passwordHash))) {
+    const ownerAccount = await findUserById(teamMember.ownerUserId);
+    if (!ownerAccount) {
+      return {
+        success: false,
+        message: 'No active partner account found for this user',
+      };
+    }
+
+    if (!(await ensureParentAccountIsActive(ownerAccount))) {
+      return {
+        success: false,
+        message: 'No active partner account found for this user',
+      };
+    }
+
     return {
-      success: false,
-      message: 'No active partner account found for this user',
+      success: true,
+      user: sanitizeTeamMemberAuthenticatedUser(teamMember, ownerAccount),
     };
   }
 
-  const passwordMatches = await comparePassword(password, user.passwordHash);
-  if (!passwordMatches) {
+  if ((ownerUser && !ownerUser.passwordHash) || (teamMember && !teamMember.passwordHash)) {
     return {
       success: false,
-      message: 'Invalid username or password',
+      message: 'Password login is not enabled for this account',
     };
   }
 
   return {
-    success: true,
-    user: sanitizeAuthenticatedUser(user),
+    success: false,
+    message: 'Invalid username or password',
   };
 }
 

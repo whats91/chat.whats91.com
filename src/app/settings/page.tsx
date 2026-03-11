@@ -43,6 +43,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useChatStore } from '@/stores/chatStore';
 import { useNotifications } from '@/hooks/use-notifications';
+import { fetchAuthSession } from '@/lib/api/auth-client';
 import {
   createTeamMember as createTeamMemberRequest,
   deleteTeamMember as deleteTeamMemberRequest,
@@ -69,12 +70,14 @@ interface TeamMemberFormState {
   name: string;
   email: string;
   mobileNumber: string;
+  password: string;
 }
 
 const EMPTY_TEAM_MEMBER_FORM: TeamMemberFormState = {
   name: '',
   email: '',
   mobileNumber: '',
+  password: '',
 };
 
 function normalizeTeamMemberForm(form: TeamMemberFormState) {
@@ -82,6 +85,7 @@ function normalizeTeamMemberForm(form: TeamMemberFormState) {
     name: form.name.trim(),
     email: form.email.trim() || null,
     mobileNumber: form.mobileNumber.trim() || null,
+    password: form.password.trim() || null,
   };
 }
 
@@ -182,9 +186,20 @@ export default function SettingsPage() {
   useEffect(() => {
     setPreferences(getNotificationPreferences());
     setIsThemeReady(true);
-    void loadTeamMembers();
-    void loadAvailableLabels();
-  }, [loadAvailableLabels, loadTeamMembers]);
+    void (async () => {
+      try {
+        const session = await fetchAuthSession();
+        if (session.user?.principalType === 'team_member') {
+          router.replace('/');
+          return;
+        }
+
+        await Promise.all([loadTeamMembers(), loadAvailableLabels()]);
+      } catch {
+        await Promise.all([loadTeamMembers(), loadAvailableLabels()]);
+      }
+    })();
+  }, [loadAvailableLabels, loadTeamMembers, router]);
 
   const handlePreferenceChange = (
     key: keyof NotificationPreferences,
@@ -246,6 +261,7 @@ export default function SettingsPage() {
       name: teamMember.name,
       email: teamMember.email || '',
       mobileNumber: teamMember.mobileNumber || '',
+      password: '',
     });
   };
 
@@ -459,7 +475,7 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form className="grid gap-4 md:grid-cols-4" onSubmit={handleCreateTeamMember}>
+                <form className="grid gap-4 md:grid-cols-5" onSubmit={handleCreateTeamMember}>
                   <div className="space-y-2 md:col-span-1">
                     <Label htmlFor="team-member-name">Name</Label>
                     <Input
@@ -495,6 +511,19 @@ export default function SettingsPage() {
                       placeholder="919876543210"
                     />
                   </div>
+                  <div className="space-y-2 md:col-span-1">
+                    <Label htmlFor="team-member-password">Password</Label>
+                    <Input
+                      id="team-member-password"
+                      type="password"
+                      value={createForm.password}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({ ...current, password: event.target.value }))
+                      }
+                      placeholder="Minimum 6 characters"
+                      required
+                    />
+                  </div>
                   <div className="flex items-end md:col-span-1">
                     <Button type="submit" className="w-full" disabled={isCreatingTeamMember}>
                       {isCreatingTeamMember ? (
@@ -518,7 +547,7 @@ export default function SettingsPage() {
               <CardHeader>
                 <CardTitle>Existing Members</CardTitle>
                 <CardDescription>
-                  Update names, email addresses, and mobile numbers for this user’s team.
+                  Update names, email addresses, mobile numbers, and passwords for this user’s team.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -543,7 +572,7 @@ export default function SettingsPage() {
                       >
                         {isEditing ? (
                           <div className="space-y-4">
-                            <div className="grid gap-4 md:grid-cols-3">
+                            <div className="grid gap-4 md:grid-cols-4">
                               <div className="space-y-2">
                                 <Label>Name</Label>
                                 <Input
@@ -573,6 +602,17 @@ export default function SettingsPage() {
                                     setEditForm((current) => ({ ...current, mobileNumber: event.target.value }))
                                   }
                                   placeholder="919876543210"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Password</Label>
+                                <Input
+                                  type="password"
+                                  value={editForm.password}
+                                  onChange={(event) =>
+                                    setEditForm((current) => ({ ...current, password: event.target.value }))
+                                  }
+                                  placeholder="Leave blank to keep current password"
                                 />
                               </div>
                             </div>

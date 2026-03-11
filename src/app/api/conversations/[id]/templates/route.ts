@@ -15,7 +15,8 @@ export async function GET(
 
     const result = await conversationController.getConversationTemplates(
       parseInt(id, 10),
-      auth.user.id
+      auth.user.id,
+      auth.user.teamMemberId
     );
 
     return NextResponse.json(result, { status: result.success ? 200 : 400 });

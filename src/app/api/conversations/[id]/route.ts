@@ -27,6 +27,7 @@ export async function GET(
     const result = await conversationController.getConversationById({
       conversationId: parseInt(id),
       userId,
+      teamMemberId: auth.user.teamMemberId,
       page: parseInt(searchParams.get('page') || '1'),
       limit: parseInt(searchParams.get('limit') || '50'),
       beforeMessageId: searchParams.get('beforeMessageId') || undefined,

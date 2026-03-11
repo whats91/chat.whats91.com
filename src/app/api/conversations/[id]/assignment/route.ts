@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
+import { requireOwnerRouteUser } from '@/server/auth/route-auth';
 import {
   assignConversationToTeamMember,
   getConversationAssignedTeamMember,
@@ -13,7 +13,7 @@ interface RouteContext {
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const auth = await requireAuthenticatedRouteUser();
+    const auth = await requireOwnerRouteUser();
     if ('response' in auth) {
       return auth.response;
     }
@@ -43,7 +43,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    const auth = await requireAuthenticatedRouteUser();
+    const auth = await requireOwnerRouteUser();
     if ('response' in auth) {
       return auth.response;
     }

@@ -61,6 +61,7 @@ export async function POST(
     const result = await conversationController.sendMessage({
       conversationId: parseInt(id),
       userId,
+      teamMemberId: auth.user.teamMemberId,
       messageData: body,
     });
     

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
+import { requireOwnerRouteUser } from '@/server/auth/route-auth';
 import { createTeamMember, listTeamMembersByUser } from '@/server/db/team-members';
 
 export async function GET() {
   try {
-    const auth = await requireAuthenticatedRouteUser();
+    const auth = await requireOwnerRouteUser();
     if ('response' in auth) {
       return auth.response;
     }
@@ -30,7 +30,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireAuthenticatedRouteUser();
+    const auth = await requireOwnerRouteUser();
     if ('response' in auth) {
       return auth.response;
     }
@@ -39,12 +39,14 @@ export async function POST(request: NextRequest) {
       name?: string;
       email?: string | null;
       mobileNumber?: string | null;
+      password?: string | null;
     };
 
     const teamMember = await createTeamMember(auth.user.id, {
       name: body.name || '',
       email: body.email,
       mobileNumber: body.mobileNumber,
+      password: body.password,
     });
 
     return NextResponse.json({

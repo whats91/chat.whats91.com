@@ -28,6 +28,7 @@ export interface TeamMemberInput {
   name: string;
   email?: string | null;
   mobileNumber?: string | null;
+  password?: string | null;
 }
 
 export interface TeamMembersResponse {

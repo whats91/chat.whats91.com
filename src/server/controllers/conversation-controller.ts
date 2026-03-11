@@ -643,6 +643,104 @@ async function getConversationAssignedLabelMap(
   return assignedLabels;
 }
 
+type TeamMemberLabelAssignmentRow = {
+  label_id: number | string | bigint;
+};
+
+function buildSqlPlaceholders(valuesCount: number): string {
+  return Array.from({ length: valuesCount }, () => '?').join(', ');
+}
+
+async function getTeamMemberAssignedLabelIds(
+  userId: string,
+  teamMemberId: string
+): Promise<string[]> {
+  const rows = await db.$queryRawUnsafe<TeamMemberLabelAssignmentRow[]>(
+    `SELECT tmla.label_id
+     FROM team_member_label_assignments tmla
+     INNER JOIN team_members tm ON tm.id = tmla.team_member_id
+     WHERE tm.user_id = ?
+       AND tmla.team_member_id = ?`,
+    userId,
+    teamMemberId
+  );
+
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => normalizeIdentifier(row.label_id))
+        .filter(Boolean)
+    )
+  );
+}
+
+function buildTeamMemberConversationAccessCondition(
+  alias: string,
+  userId: string,
+  teamMemberId: string,
+  assignedLabelIds: string[]
+): { sql: string; params: unknown[] } {
+  const accessClauses = [
+    `EXISTS (
+      SELECT 1
+      FROM conversation_team_assignments cta
+      WHERE cta.conversation_id = ${alias}.id
+        AND cta.user_id = ?
+        AND cta.team_member_id = ?
+    )`,
+  ];
+  const params: unknown[] = [userId, teamMemberId];
+
+  if (assignedLabelIds.length > 0) {
+    accessClauses.push(
+      `EXISTS (
+        SELECT 1
+        FROM conversation_labels cl
+        WHERE cl.conversation_id = ${alias}.id
+          AND cl.label_id IN (${buildSqlPlaceholders(assignedLabelIds.length)})
+      )`
+    );
+    params.push(...assignedLabelIds);
+  }
+
+  return {
+    sql: `(${accessClauses.join(' OR ')})`,
+    params,
+  };
+}
+
+async function getAccessibleConversationRow(
+  conversationId: number,
+  userId: string,
+  teamMemberId?: string | null
+): Promise<any | null> {
+  if (!teamMemberId) {
+    const rows = await queryConversationsDb<any>(
+      `SELECT *
+       FROM conversations
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+      [conversationId, userId]
+    );
+
+    return rows[0] || null;
+  }
+
+  const assignedLabelIds = await getTeamMemberAssignedLabelIds(userId, teamMemberId);
+  const access = buildTeamMemberConversationAccessCondition('c', userId, teamMemberId, assignedLabelIds);
+  const rows = await queryConversationsDb<any>(
+    `SELECT c.*
+     FROM conversations c
+     WHERE c.id = ?
+       AND c.user_id = ?
+       AND ${access.sql}
+     LIMIT 1`,
+    [conversationId, userId, ...access.params]
+  );
+
+  return rows[0] || null;
+}
+
 async function resolveConversationPhoneNumberForLabels(
   conversation: {
     phone_number?: string | null;
@@ -893,16 +991,14 @@ async function resolveConversationSendContext(
   userId: string,
   options: {
     requireOpenServiceWindow?: boolean;
+    teamMemberId?: string | null;
   } = {}
 ): Promise<
   | { success: true; data: ResolvedConversationSendContext }
   | { success: false; message: string }
 > {
-  const { requireOpenServiceWindow = true } = options;
-  const [conversation] = await queryConversationsDb<any>(
-    `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
-    [conversationId, userId]
-  );
+  const { requireOpenServiceWindow = true, teamMemberId = null } = options;
+  const conversation = await getAccessibleConversationRow(conversationId, userId, teamMemberId);
 
   if (!conversation) {
     return {
@@ -1122,6 +1218,7 @@ function buildExportTimestampSlug(referenceDate = new Date()): string {
 
 export interface GetConversationsParams {
   userId: string;
+  teamMemberId?: string | null;
   page?: number;
   limit?: number;
   search?: string;
@@ -1133,6 +1230,7 @@ export interface GetConversationsParams {
 
 export async function getConversations({
   userId,
+  teamMemberId = null,
   page = 1,
   limit = 20,
   search,
@@ -1143,6 +1241,9 @@ export async function getConversations({
 }: GetConversationsParams) {
   try {
     const offset = (page - 1) * limit;
+    const assignedLabelIds = teamMemberId
+      ? await getTeamMemberAssignedLabelIds(userId, teamMemberId)
+      : [];
     
     // Build the SQL query
     let sql = `
@@ -1163,6 +1264,17 @@ export async function getConversations({
     `;
     
     const params: unknown[] = [userId];
+
+    if (teamMemberId) {
+      const access = buildTeamMemberConversationAccessCondition(
+        'c',
+        userId,
+        teamMemberId,
+        assignedLabelIds
+      );
+      sql += ` AND ${access.sql}`;
+      params.push(...access.params);
+    }
     
     // Add filters
     if (search) {
@@ -1212,6 +1324,17 @@ export async function getConversations({
     // Get total count
     let countSql = `SELECT COUNT(*) as total FROM conversations c WHERE c.user_id = ?`;
     const countParams: unknown[] = [userId];
+
+    if (teamMemberId) {
+      const access = buildTeamMemberConversationAccessCondition(
+        'c',
+        userId,
+        teamMemberId,
+        assignedLabelIds
+      );
+      countSql += ` AND ${access.sql}`;
+      countParams.push(...access.params);
+    }
     
     if (search) {
       countSql += ` AND (c.contact_name LIKE ? OR c.contact_phone LIKE ? OR c.last_message_content LIKE ?)`;
@@ -1356,11 +1479,13 @@ function normalizeTargetName(firstName: string | null, lastName: string | null):
 
 export async function getConversationTargets({
   userId,
+  teamMemberId = null,
   search,
   limit = 50,
   serviceWindowOnly = false,
 }: {
   userId: string;
+  teamMemberId?: string | null;
   search?: string;
   limit?: number;
   serviceWindowOnly?: boolean;
@@ -1369,20 +1494,34 @@ export async function getConversationTargets({
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const trimmedSearch = search?.trim();
     const serviceWindowThreshold = new Date(Date.now() - SERVICE_WINDOW_DURATION_MS);
+    const assignedLabelIds = teamMemberId
+      ? await getTeamMemberAssignedLabelIds(userId, teamMemberId)
+      : [];
 
     let conversationsSql = `
-      SELECT id, contact_phone, contact_name, last_message_at, updated_at
-      FROM conversations
-      WHERE user_id = ? AND is_archived = false
+      SELECT c.id, c.contact_phone, c.contact_name, c.last_message_at, c.updated_at
+      FROM conversations c
+      WHERE c.user_id = ? AND c.is_archived = false
     `;
     const conversationParams: unknown[] = [userId];
+
+    if (teamMemberId) {
+      const access = buildTeamMemberConversationAccessCondition(
+        'c',
+        userId,
+        teamMemberId,
+        assignedLabelIds
+      );
+      conversationsSql += ` AND ${access.sql}`;
+      conversationParams.push(...access.params);
+    }
 
     if (serviceWindowOnly) {
       conversationsSql += `
         AND EXISTS (
           SELECT 1
           FROM conversation_messages cm
-          WHERE cm.conversation_id = conversations.id
+          WHERE cm.conversation_id = c.id
             AND cm.direction = 'inbound'
             AND COALESCE(cm.created_at, cm.timestamp) >= ?
         )
@@ -1403,6 +1542,46 @@ export async function getConversationTargets({
       conversationsSql,
       conversationParams
     );
+
+    if (teamMemberId) {
+      const targets: ConversationTargetItem[] = [];
+
+      for (const row of conversationRows) {
+        const normalizedPhone = normalizeConversationPhone(row.contact_phone);
+        if (!normalizedPhone) {
+          continue;
+        }
+
+        targets.push({
+          id: `conversation:${row.id}`,
+          source: 'conversation',
+          conversationId: String(row.id),
+          phone: normalizedPhone,
+          displayName: getDisplayName(row.contact_name, normalizedPhone),
+          contactName: row.contact_name,
+          lastMessageAt: row.last_message_at || row.updated_at,
+          isServiceWindowOpen: serviceWindowOnly ? true : undefined,
+        });
+      }
+
+      targets.sort((left, right) => {
+          const leftTime = left.lastMessageAt ? new Date(left.lastMessageAt).getTime() : 0;
+          const rightTime = right.lastMessageAt ? new Date(right.lastMessageAt).getTime() : 0;
+          if (leftTime !== rightTime) {
+            return rightTime - leftTime;
+          }
+
+          return left.displayName.localeCompare(right.displayName);
+        });
+
+      return {
+        success: true,
+        message: 'Conversation targets retrieved successfully',
+        data: {
+          targets: targets.slice(0, safeLimit),
+        },
+      };
+    }
 
     let contactsSql = `
       SELECT id, phone, first_name, last_name, updated_at
@@ -1625,6 +1804,7 @@ export async function startConversation({
 export interface GetConversationParams {
   conversationId: number;
   userId: string;
+  teamMemberId?: string | null;
   page?: number;
   limit?: number;
   beforeMessageId?: string;
@@ -1633,15 +1813,13 @@ export interface GetConversationParams {
 export async function getConversationById({
   conversationId,
   userId,
+  teamMemberId = null,
   page = 1,
   limit = 50,
 }: GetConversationParams) {
   try {
     // Get conversation
-    const [conversation] = await queryConversationsDb<any>(
-      `SELECT * FROM conversations WHERE id = ? AND user_id = ?`,
-      [conversationId, userId]
-    );
+    const conversation = await getAccessibleConversationRow(conversationId, userId, teamMemberId);
     
     if (!conversation) {
       return {
@@ -1831,11 +2009,13 @@ export async function getConversationMediaMessages(
 
 export async function getConversationTemplates(
   conversationId: number,
-  userId: string
+  userId: string,
+  teamMemberId?: string | null
 ) {
   try {
     const sendContext = await resolveConversationSendContext(conversationId, userId, {
       requireOpenServiceWindow: false,
+      teamMemberId,
     });
 
     if (!sendContext.success) {
@@ -1881,12 +2061,14 @@ export async function getConversationTemplates(
 export interface SendMessageParams {
   conversationId: number;
   userId: string;
+  teamMemberId?: string | null;
   messageData: SendMessageRequest;
 }
 
 export async function sendMessage({
   conversationId,
   userId,
+  teamMemberId = null,
   messageData,
 }: SendMessageParams) {
   let pendingUploadToken: string | null = null;
@@ -1905,6 +2087,7 @@ export async function sendMessage({
     let templatePreviewMediaFilename: string | null = null;
     const sendContext = await resolveConversationSendContext(conversationId, userId, {
       requireOpenServiceWindow: messageData.messageType !== 'template',
+      teamMemberId,
     });
     if (!sendContext.success) {
       return {
@@ -2376,19 +2559,30 @@ export async function sendMessage({
 export async function sendVoiceNote(params: {
   conversationId: number;
   userId: string;
+  teamMemberId?: string | null;
   fileBuffer: Buffer;
   mimeType: string;
   originalFilename: string;
   fileSize: number;
   recordingMode: VoiceNoteRecordingMode;
 }) {
-  const { conversationId, userId, fileBuffer, mimeType, originalFilename, recordingMode } = params;
+  const {
+    conversationId,
+    userId,
+    teamMemberId = null,
+    fileBuffer,
+    mimeType,
+    originalFilename,
+    recordingMode,
+  } = params;
 
   let pendingUploadToken: string | null = null;
   let acceptedWhatsappMessageId: string | null = null;
 
   try {
-    const sendContext = await resolveConversationSendContext(conversationId, userId);
+    const sendContext = await resolveConversationSendContext(conversationId, userId, {
+      teamMemberId,
+    });
     if (!sendContext.success) {
       return {
         success: false,
@@ -3058,9 +3252,11 @@ export async function streamConversationProfileImage(params: {
 // CONVERSATION LABELS
 // ========================================
 
-export async function getUserChatLabels(userId: string) {
+export async function getUserChatLabels(userId: string, teamMemberId?: string | null) {
   try {
-    const labels = await getChatLabelsByUser(userId);
+    const labels = teamMemberId
+      ? await getChatLabelsByIds(userId, await getTeamMemberAssignedLabelIds(userId, teamMemberId))
+      : await getChatLabelsByUser(userId);
 
     return {
       success: true,

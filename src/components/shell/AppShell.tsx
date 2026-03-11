@@ -27,6 +27,7 @@ import { NewChatModal } from '@/components/chat/NewChatModal';
 import { getCurrentUserId } from '@/lib/config/current-user';
 import { usePubSub } from '@/hooks/use-pubsub';
 import { debugPubSub, logPubSubPayload } from '@/lib/pubsub/debug';
+import { fetchAuthSession } from '@/lib/api/auth-client';
 import { getNotificationPreferences } from '@/lib/notifications/preferences';
 import { collectNotificationEnvironmentSnapshot, debugNotification } from '@/lib/notifications/debug';
 import {
@@ -315,6 +316,7 @@ export function AppShell() {
   const pendingTypingCountsRef = useRef(new Map<string, number>());
   const autoPermissionAttemptedRef = useRef(false);
   const interactionRetryBoundRef = useRef(false);
+  const [principalType, setPrincipalType] = useState<'owner' | 'team_member'>('owner');
   const {
     supported: notificationsSupported,
     permission: notificationPermission,
@@ -322,6 +324,27 @@ export function AppShell() {
   } = useNotifications();
 
   useServiceWorker({ registerOnMount: true });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const session = await fetchAuthSession();
+        if (!cancelled) {
+          setPrincipalType(session.user?.principalType === 'team_member' ? 'team_member' : 'owner');
+        }
+      } catch {
+        if (!cancelled) {
+          setPrincipalType('owner');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const clearConversationTypingIfIdle = useCallback(
     (conversationId: string, userId?: string, contactPhone?: string, contactName?: string | null) => {
@@ -503,8 +526,24 @@ export function AppShell() {
     (payload: PubSubClientPayload) => {
       logPubSubPayload(payload);
 
+      const shouldIgnoreConversationEvent = (conversationId: string | number | null | undefined) => {
+        if (principalType !== 'team_member') {
+          return false;
+        }
+
+        const normalizedConversationId = conversationId == null ? '' : String(conversationId);
+        if (!normalizedConversationId) {
+          return true;
+        }
+
+        return !conversations.some((conversation) => conversation.id === normalizedConversationId);
+      };
+
       if (payload.type === 'new_message') {
         const event = payload as PubSubNewMessageEvent;
+        if (shouldIgnoreConversationEvent(event.data.conversation.id)) {
+          return;
+        }
         debugPubSub('AppShell forwarding new_message to store', {
           conversationId: event.data.conversation.id,
           messageId: event.data.messageRecord.id,
@@ -526,6 +565,9 @@ export function AppShell() {
 
       if (payload.type === 'status_update') {
         const event = payload as PubSubStatusUpdateEvent;
+        if (shouldIgnoreConversationEvent(event.data.conversationId)) {
+          return;
+        }
         debugPubSub('AppShell forwarding status_update to store', {
           conversationId: event.data.conversationId,
           messageId: event.data.messageId,
@@ -547,6 +589,9 @@ export function AppShell() {
       }
 
       if (isLegacyStatusPayload(payload)) {
+        if (shouldIgnoreConversationEvent(payload.conversationId)) {
+          return;
+        }
         debugPubSub('AppShell forwarding legacy status payload to store', {
           payload,
         });
@@ -573,6 +618,10 @@ export function AppShell() {
           return;
         }
 
+        if (shouldIgnoreConversationEvent(legacyMessage.conversationId)) {
+          return;
+        }
+
         debugPubSub('AppShell forwarding legacy message payload to store', {
           conversationId: legacyMessage.conversationId,
           messageId: legacyMessage.id,
@@ -595,7 +644,14 @@ export function AppShell() {
         payload,
       });
     },
-    [handleNewMessage, handleStatusUpdate, maybeShowStatusNotification, scheduleInboundMessage]
+    [
+      conversations,
+      handleNewMessage,
+      handleStatusUpdate,
+      maybeShowStatusNotification,
+      principalType,
+      scheduleInboundMessage,
+    ]
   );
 
   usePubSub({

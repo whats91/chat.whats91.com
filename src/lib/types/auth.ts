@@ -6,6 +6,8 @@ export interface AuthenticatedUser {
   phone: string | null;
   username: string | null;
   type: string;
+  principalType: 'owner' | 'team_member';
+  teamMemberId: string | null;
 }
 
 export interface AuthSessionResponse {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuthenticatedRouteUser } from '@/server/auth/route-auth';
+import { requireOwnerRouteUser } from '@/server/auth/route-auth';
 import { deleteTeamMember, updateTeamMember } from '@/server/db/team-members';
 
 interface RouteContext {
@@ -10,7 +10,7 @@ interface RouteContext {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    const auth = await requireAuthenticatedRouteUser();
+    const auth = await requireOwnerRouteUser();
     if ('response' in auth) {
       return auth.response;
     }
@@ -20,12 +20,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       name?: string;
       email?: string | null;
       mobileNumber?: string | null;
+      password?: string | null;
     };
 
     const teamMember = await updateTeamMember(auth.user.id, id, {
       name: body.name || '',
       email: body.email,
       mobileNumber: body.mobileNumber,
+      password: body.password,
     });
 
     return NextResponse.json({
@@ -51,7 +53,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
 export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
-    const auth = await requireAuthenticatedRouteUser();
+    const auth = await requireOwnerRouteUser();
     if ('response' in auth) {
       return auth.response;
     }

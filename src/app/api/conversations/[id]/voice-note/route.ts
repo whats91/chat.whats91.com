@@ -37,6 +37,7 @@ export async function POST(
     const result = await conversationController.sendVoiceNote({
       conversationId: Number.parseInt(id, 10),
       userId,
+      teamMemberId: auth.user.teamMemberId,
       fileBuffer: Buffer.from(await fileEntry.arrayBuffer()),
       mimeType: fileEntry.type || 'application/octet-stream',
       originalFilename: fileEntry.name || `voice-note-${Date.now()}.bin`,

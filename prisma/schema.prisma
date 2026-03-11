@@ -203,6 +203,7 @@ model TeamMember {
   name         String   @db.VarChar(255)
   email        String?  @db.VarChar(255)
   mobileNumber String?  @map("mobile_number") @db.VarChar(32)
+  password     String?  @db.VarChar(255)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
 

@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
 
     const result = await conversationController.getConversationTargets({
       userId,
+      teamMemberId: auth.user.teamMemberId,
       search: searchParams.get('search') || undefined,
       limit: parseInt(searchParams.get('limit') || '50', 10),
       serviceWindowOnly: searchParams.get('serviceWindowOnly') === 'true',

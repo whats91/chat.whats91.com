@@ -31,3 +31,23 @@ export async function requireAuthenticatedRouteUser(): Promise<RouteAuthResult> 
   return { user };
 }
 
+export async function requireOwnerRouteUser(): Promise<RouteAuthResult> {
+  const auth = await requireAuthenticatedRouteUser();
+  if ('response' in auth) {
+    return auth;
+  }
+
+  if (auth.user.principalType !== 'owner') {
+    return {
+      response: NextResponse.json(
+        {
+          success: false,
+          message: 'Only workspace owners can access this resource',
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return auth;
+}

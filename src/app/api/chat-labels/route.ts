@@ -9,7 +9,10 @@ export async function GET(_request: NextRequest) {
       return auth.response;
     }
 
-    const result = await conversationController.getUserChatLabels(auth.user.id);
+    const result = await conversationController.getUserChatLabels(
+      auth.user.id,
+      auth.user.teamMemberId
+    );
     return NextResponse.json(result, { status: result.success ? 200 : 400 });
   } catch (error) {
     console.error('[API] GET /chat-labels error:', error);

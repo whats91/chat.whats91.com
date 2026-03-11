@@ -32,6 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { formatChatPhoneNumber } from '@/lib/phone/format';
+import { fetchAuthSession } from '@/lib/api/auth-client';
 import {
   fetchConversationAssignment,
   fetchTeamMembers,
@@ -85,6 +86,7 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
   const [assignedTeamMemberId, setAssignedTeamMemberId] = useState('unassigned');
   const [isAssignmentLoading, setIsAssignmentLoading] = useState(false);
   const [isAssignmentSaving, setIsAssignmentSaving] = useState(false);
+  const [canManageAssignments, setCanManageAssignments] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (conversation && !isEditingName) {
@@ -110,6 +112,19 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
 
     const loadAssignmentState = async () => {
       try {
+        const session = await fetchAuthSession();
+        if (cancelled) {
+          return;
+        }
+
+        const isOwner = session.user?.principalType !== 'team_member';
+        setCanManageAssignments(isOwner);
+        if (!isOwner) {
+          setAvailableTeamMembers([]);
+          setAssignedTeamMemberId('unassigned');
+          return;
+        }
+
         setIsAssignmentLoading(true);
 
         const [teamMembersResponse, assignmentResponse] = await Promise.all([
@@ -133,13 +148,16 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         setAssignedTeamMemberId(assignmentResponse.data?.assignedTeamMember?.id || 'unassigned');
       } catch (error) {
         if (!cancelled) {
+          setCanManageAssignments(false);
           setAvailableTeamMembers([]);
           setAssignedTeamMemberId('unassigned');
-          toast({
-            title: 'Unable to load assignment data',
-            description: error instanceof Error ? error.message : 'Please try again.',
-            variant: 'destructive',
-          });
+          if (error instanceof Error && error.message !== 'Authentication required') {
+            toast({
+              title: 'Unable to load assignment data',
+              description: error.message || 'Please try again.',
+              variant: 'destructive',
+            });
+          }
         }
       } finally {
         if (!cancelled) {
@@ -467,47 +485,51 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
           </>
         )}
 
-        <div className="p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-medium">Assigned teammate</h3>
-            {isAssignmentSaving ? (
-              <span className="text-xs text-muted-foreground">Saving...</span>
-            ) : null}
-          </div>
-          <Select
-            value={assignedTeamMemberId}
-            onValueChange={(value) => {
-              void handleAssignmentChange(value);
-            }}
-            disabled={isAssignmentLoading || isAssignmentSaving}
-          >
-            <SelectTrigger className="bg-background/85">
-              <SelectValue
-                placeholder={
-                  isAssignmentLoading ? 'Loading team members...' : 'Assign a team member'
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {availableTeamMembers.map((teamMember) => (
-                <SelectItem key={teamMember.id} value={teamMember.id}>
-                  {teamMember.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Direct assignment stays with this chat even if label-based assignment is different.
-          </p>
-          {availableTeamMembers.length === 0 && !isAssignmentLoading ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Add team members in Settings before assigning chats here.
-            </p>
-          ) : null}
-        </div>
+        {canManageAssignments ? (
+          <>
+            <div className="p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium">Assigned teammate</h3>
+                {isAssignmentSaving ? (
+                  <span className="text-xs text-muted-foreground">Saving...</span>
+                ) : null}
+              </div>
+              <Select
+                value={assignedTeamMemberId}
+                onValueChange={(value) => {
+                  void handleAssignmentChange(value);
+                }}
+                disabled={isAssignmentLoading || isAssignmentSaving}
+              >
+                <SelectTrigger className="bg-background/85">
+                  <SelectValue
+                    placeholder={
+                      isAssignmentLoading ? 'Loading team members...' : 'Assign a team member'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {availableTeamMembers.map((teamMember) => (
+                    <SelectItem key={teamMember.id} value={teamMember.id}>
+                      {teamMember.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Direct assignment stays with this chat even if label-based assignment is different.
+              </p>
+              {availableTeamMembers.length === 0 && !isAssignmentLoading ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Add team members in Settings before assigning chats here.
+                </p>
+              ) : null}
+            </div>
 
-        <Separator />
+            <Separator />
+          </>
+        ) : null}
         
         {/* Media & Links */}
         <div className="p-4">
@@ -560,17 +582,21 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         
         {/* Quick Links */}
         <div className="p-4 space-y-3">
-          <QuickLink
-            icon={Tag}
-            label="Labels"
-            count={conversationLabels.length}
-            onClick={() => setIsLabelsDialogOpen(true)}
-          />
-          <QuickLink
-            icon={UserCheck}
-            label="Assignment"
-            count={assignedTeamMemberId !== 'unassigned' ? 1 : 0}
-          />
+          {canManageAssignments ? (
+            <>
+              <QuickLink
+                icon={Tag}
+                label="Labels"
+                count={conversationLabels.length}
+                onClick={() => setIsLabelsDialogOpen(true)}
+              />
+              <QuickLink
+                icon={UserCheck}
+                label="Assignment"
+                count={assignedTeamMemberId !== 'unassigned' ? 1 : 0}
+              />
+            </>
+          ) : null}
         </div>
         
         <Separator />
@@ -639,12 +665,14 @@ export function RightInfoPanel({ conversationId }: RightInfoPanelProps) {
         conversationName={participantName}
       />
 
-      <ConversationLabelsDialog
-        open={isLabelsDialogOpen}
-        onOpenChange={setIsLabelsDialogOpen}
-        conversationId={conversation.id}
-        conversationName={participantName}
-      />
+      {canManageAssignments ? (
+        <ConversationLabelsDialog
+          open={isLabelsDialogOpen}
+          onOpenChange={setIsLabelsDialogOpen}
+          conversationId={conversation.id}
+          conversationName={participantName}
+        />
+      ) : null}
     </div>
   );
 }

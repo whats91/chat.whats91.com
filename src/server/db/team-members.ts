@@ -24,6 +24,7 @@ interface TeamMemberRow {
   name: string;
   email: string | null;
   mobile_number: string | null;
+  password?: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -57,6 +58,13 @@ function normalizePhone(value: string | null | undefined): string | null {
   return normalized || null;
 }
 
+async function hashPassword(password: string): Promise<string> {
+  const bcrypt = (await import('bcryptjs')) as unknown as {
+    hash(value: string, rounds: number): Promise<string>;
+  };
+  return bcrypt.hash(password, 10);
+}
+
 function toIsoString(value: Date | string): string {
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
@@ -88,11 +96,15 @@ function mapTeamMemberRow(row: TeamMemberRow, assignedLabels: ChatLabel[] = []):
 }
 
 function validateTeamMemberInput(
-  input: TeamMemberInput
-): { name: string; email: string | null; mobileNumber: string | null } {
+  input: TeamMemberInput,
+  options: {
+    requirePassword: boolean;
+  }
+): { name: string; email: string | null; mobileNumber: string | null; password: string | null } {
   const name = input.name.trim();
   const email = normalizeNullableText(input.email);
   const mobileNumber = normalizePhone(input.mobileNumber);
+  const password = normalizeNullableText(input.password);
 
   if (!name) {
     throw new Error('Name is required');
@@ -102,10 +114,19 @@ function validateTeamMemberInput(
     throw new Error('Enter a valid email address');
   }
 
+  if (options.requirePassword && !password) {
+    throw new Error('Password is required');
+  }
+
+  if (password && password.length < 6) {
+    throw new Error('Password must be at least 6 characters');
+  }
+
   return {
     name,
     email,
     mobileNumber,
+    password,
   };
 }
 
@@ -165,7 +186,7 @@ async function hydrateTeamMembers(
 
 async function getTeamMemberRowById(userId: string, teamMemberId: string): Promise<TeamMemberRow | null> {
   const rows = await db.$queryRawUnsafe<TeamMemberRow[]>(
-    `SELECT id, uid, user_id, name, email, mobile_number, created_at, updated_at
+    `SELECT id, uid, user_id, name, email, mobile_number, password, created_at, updated_at
      FROM team_members
      WHERE id = ? AND user_id = ?
      LIMIT 1`,
@@ -179,7 +200,7 @@ async function getTeamMemberRowById(userId: string, teamMemberId: string): Promi
 export async function listTeamMembersByUser(userId: string): Promise<TeamMember[]> {
   try {
     const rows = await db.$queryRawUnsafe<TeamMemberRow[]>(
-      `SELECT id, uid, user_id, name, email, mobile_number, created_at, updated_at
+      `SELECT id, uid, user_id, name, email, mobile_number, password, created_at, updated_at
        FROM team_members
        WHERE user_id = ?
        ORDER BY created_at DESC, id DESC`,
@@ -216,23 +237,25 @@ export async function getTeamMemberById(userId: string, teamMemberId: string): P
 }
 
 export async function createTeamMember(userId: string, input: TeamMemberInput): Promise<TeamMember> {
-  const values = validateTeamMemberInput(input);
+  const values = validateTeamMemberInput(input, { requirePassword: true });
 
   try {
     const uid = randomUUID();
+    const passwordHash = await hashPassword(values.password || '');
 
     await db.$executeRawUnsafe(
-      `INSERT INTO team_members (uid, user_id, name, email, mobile_number, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO team_members (uid, user_id, name, email, mobile_number, password, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       uid,
       userId,
       values.name,
       values.email,
-      values.mobileNumber
+      values.mobileNumber,
+      passwordHash
     );
 
     const rows = await db.$queryRawUnsafe<TeamMemberRow[]>(
-      `SELECT id, uid, user_id, name, email, mobile_number, created_at, updated_at
+      `SELECT id, uid, user_id, name, email, mobile_number, password, created_at, updated_at
        FROM team_members
        WHERE user_id = ? AND uid = ?
        LIMIT 1`,
@@ -260,16 +283,22 @@ export async function updateTeamMember(
   teamMemberId: string,
   input: TeamMemberInput
 ): Promise<TeamMember> {
-  const values = validateTeamMemberInput(input);
+  const values = validateTeamMemberInput(input, { requirePassword: false });
 
   try {
+    const updateClauses = ['name = ?', 'email = ?', 'mobile_number = ?', 'updated_at = CURRENT_TIMESTAMP'];
+    const updateParams: unknown[] = [values.name, values.email, values.mobileNumber];
+
+    if (values.password) {
+      updateClauses.splice(3, 0, 'password = ?');
+      updateParams.push(await hashPassword(values.password));
+    }
+
     const updatedCount = await db.$executeRawUnsafe(
       `UPDATE team_members
-       SET name = ?, email = ?, mobile_number = ?, updated_at = CURRENT_TIMESTAMP
+       SET ${updateClauses.join(', ')}
        WHERE id = ? AND user_id = ?`,
-      values.name,
-      values.email,
-      values.mobileNumber,
+      ...updateParams,
       teamMemberId,
       userId
     );
