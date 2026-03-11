@@ -15,6 +15,7 @@ import { ConversationDangerDialog } from '@/components/chat/ConversationDangerDi
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
 import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDialog';
 import { MessageInfoDialog } from '@/components/chat/MessageInfoDialog';
+import { MediaComposerDialog } from '@/components/chat/MediaComposerDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
 import { MessageRewritePopover } from '@/components/chat/MessageRewritePopover';
@@ -1279,7 +1280,9 @@ function MessageComposer({
   const clearConversationDraft = useChatStore((state) => state.clearConversationDraft);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [isMobileUtilityTrayOpen, setIsMobileUtilityTrayOpen] = useState(false);
+  const [isMediaComposerOpen, setIsMediaComposerOpen] = useState(false);
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
+  const [pendingMediaFile, setPendingMediaFile] = useState<File | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const mobileMessageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1344,13 +1347,13 @@ function MessageComposer({
     await loadConversations();
   };
 
-  const handleFileSend = async (file: File) => {
+  const handleFileSend = async (file: File, captionOverride?: string) => {
     if (isBlocked) {
-      return;
+      return false;
     }
 
     const messageType = inferMessageTypeFromFile(file);
-    const trimmedCaption = message.trim() || undefined;
+    const trimmedCaption = captionOverride?.trim() || undefined;
     const messageContent =
       trimmedCaption || (messageType === 'document' ? file.name : undefined);
 
@@ -1377,12 +1380,14 @@ function MessageComposer({
 
       clearConversationDraft(conversationId);
       await reloadConversationState();
+      return true;
     } catch (error) {
       toast({
         title: 'Attachment failed',
         description: error instanceof Error ? error.message : 'Unable to send the selected file',
         variant: 'destructive',
       });
+      return false;
     } finally {
       setIsUploadingAttachment(false);
     }
@@ -1396,11 +1401,17 @@ function MessageComposer({
       return;
     }
 
-    void handleFileSend(file);
+    setPendingMediaFile(file);
+    setIsMediaComposerOpen(true);
   };
 
   useEffect(() => {
     setIsMobileUtilityTrayOpen(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    setPendingMediaFile(null);
+    setIsMediaComposerOpen(false);
   }, [conversationId]);
   
   return (
@@ -1621,6 +1632,20 @@ function MessageComposer({
         onOpenChange={setIsTemplateDialogOpen}
         conversationId={conversationId}
         onSent={reloadConversationState}
+      />
+
+      <MediaComposerDialog
+        open={isMediaComposerOpen}
+        file={pendingMediaFile}
+        initialCaption={message}
+        isSending={isUploadingAttachment}
+        onOpenChange={(nextOpen) => {
+          setIsMediaComposerOpen(nextOpen);
+          if (!nextOpen) {
+            setPendingMediaFile(null);
+          }
+        }}
+        onSend={({ file, caption }) => handleFileSend(file, caption)}
       />
     </div>
   );
