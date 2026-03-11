@@ -103,9 +103,15 @@ function getTopP(): number {
   return Number.isFinite(raw) ? raw : 0.9;
 }
 
-function getMaxOutputTokens(): number {
-  const raw = Number(process.env.GEMINI_REWRITE_MAX_OUTPUT_TOKENS);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 400;
+function getMaxOutputTokens(mode: MessageAssistMode): number {
+  const rewriteRaw = Number(process.env.GEMINI_REWRITE_MAX_OUTPUT_TOKENS);
+  const translateRaw = Number(process.env.GEMINI_TRANSLATE_MAX_OUTPUT_TOKENS);
+
+  const rewriteFallback = Number.isFinite(rewriteRaw) && rewriteRaw > 0 ? Math.floor(rewriteRaw) : 800;
+  const translateFallback =
+    Number.isFinite(translateRaw) && translateRaw > 0 ? Math.floor(translateRaw) : 600;
+
+  return mode === 'translate' ? translateFallback : rewriteFallback;
 }
 
 function buildRewritePrompt(text: string): string {
@@ -249,7 +255,7 @@ export async function rewriteMessageWithGemini(
       responseMimeType: 'application/json',
       temperature: getTemperature(input.mode),
       topP: getTopP(),
-      maxOutputTokens: getMaxOutputTokens(),
+      maxOutputTokens: getMaxOutputTokens(input.mode),
       candidateCount: 1,
     },
   };
@@ -298,29 +304,54 @@ export async function rewriteMessageWithGemini(
       throw promptBlock;
     }
 
-    const finishReason = payload?.candidates?.[0]?.finishReason;
-    const finishReasonError = normalizeGeminiFinishReason(finishReason);
-    if (finishReasonError) {
-      throw finishReasonError;
-    }
-
     const rawText = payload ? extractCandidateText(payload) : '';
     if (!rawText) {
       throw createEmptyResponseError();
     }
 
+    const finishReason = payload?.candidates?.[0]?.finishReason;
     if (input.mode === 'translate') {
+      const translation = parseTranslationResponse(rawText, targetLanguage);
+      const finishReasonError = normalizeGeminiFinishReason(finishReason);
+      if (finishReasonError && finishReasonError.code !== 'candidate_max_tokens') {
+        throw finishReasonError;
+      }
+
+      if (finishReasonError?.code === 'candidate_max_tokens') {
+        log.warn('Gemini translation hit MAX_TOKENS but returned valid output', {
+          userId: input.userId,
+          conversationId: input.conversationId || null,
+          model,
+          mode: input.mode,
+        });
+      }
+
       return {
         mode: 'translate',
         model,
-        translation: parseTranslationResponse(rawText, targetLanguage),
+        translation,
       };
+    }
+
+    const rewrite = parseRewriteResponse(rawText);
+    const finishReasonError = normalizeGeminiFinishReason(finishReason);
+    if (finishReasonError && finishReasonError.code !== 'candidate_max_tokens') {
+      throw finishReasonError;
+    }
+
+    if (finishReasonError?.code === 'candidate_max_tokens') {
+      log.warn('Gemini rewrite hit MAX_TOKENS but returned valid output', {
+        userId: input.userId,
+        conversationId: input.conversationId || null,
+        model,
+        mode: input.mode,
+      });
     }
 
     return {
       mode: 'rewrite',
       model,
-      rewrite: parseRewriteResponse(rawText),
+      rewrite,
     };
   } catch (error) {
     const normalizedError = normalizeGeminiFetchError(error);
