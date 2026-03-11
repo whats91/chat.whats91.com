@@ -1,0 +1,225 @@
+import 'server-only';
+
+// Dependency note:
+// Gemini request/response changes here must stay aligned with:
+// - src/app/api/ai/rewrite/route.ts
+// - src/lib/types/ai.ts
+// - src/components/chat/MessageRewritePopover.tsx
+
+import { Logger } from '@/lib/logger';
+
+const log = new Logger('GeminiRewrite');
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+interface RewriteMessageInput {
+  text: string;
+  conversationId?: string;
+  userId: string;
+}
+
+interface GeminiGenerateContentResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+    finishReason?: string;
+  }>;
+  promptFeedback?: {
+    blockReason?: string;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+export interface RewriteMessageResult {
+  professional: string;
+  alternative: string;
+  model: string;
+}
+
+function getGeminiApiKey(): string {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
+  }
+
+  return apiKey;
+}
+
+function getGeminiModel(): string {
+  return process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+}
+
+function getGeminiBaseUrl(): string {
+  return process.env.GEMINI_API_BASE_URL?.trim() || DEFAULT_GEMINI_BASE_URL;
+}
+
+function getTimeoutMs(): number {
+  const raw = Number(process.env.GEMINI_REWRITE_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
+}
+
+function getTemperature(): number {
+  const raw = Number(process.env.GEMINI_REWRITE_TEMPERATURE);
+  return Number.isFinite(raw) ? raw : 0.7;
+}
+
+function getTopP(): number {
+  const raw = Number(process.env.GEMINI_REWRITE_TOP_P);
+  return Number.isFinite(raw) ? raw : 0.9;
+}
+
+function getMaxOutputTokens(): number {
+  const raw = Number(process.env.GEMINI_REWRITE_MAX_OUTPUT_TOKENS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 400;
+}
+
+function buildPrompt(text: string): string {
+  return [
+    'You rewrite WhatsApp chat drafts for customer communication.',
+    'Return exactly one JSON object with keys "professional" and "alternative".',
+    'Rules:',
+    '- Keep the original language used by the user. Do not translate unless the input is mixed and translation is required for clarity.',
+    '- Preserve names, phone numbers, URLs, dates, currencies, amounts, order IDs, and placeholders exactly.',
+    '- Keep the meaning unchanged.',
+    '- "professional" should be polished, respectful, and business-appropriate.',
+    '- "alternative" should be a different natural variation with the same intent.',
+    '- Do not wrap the JSON in markdown fences.',
+    '',
+    'User draft:',
+    text,
+  ].join('\n');
+}
+
+function extractCandidateText(payload: GeminiGenerateContentResponse): string {
+  const parts = payload.candidates?.[0]?.content?.parts || [];
+  const text = parts
+    .map((part) => (typeof part.text === 'string' ? part.text : ''))
+    .join('')
+    .trim();
+
+  return text;
+}
+
+function stripMarkdownFence(value: string): string {
+  return value
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+}
+
+function parseRewriteResponse(rawText: string): Pick<RewriteMessageResult, 'professional' | 'alternative'> {
+  const cleaned = stripMarkdownFence(rawText);
+  const jsonCandidate = cleaned.match(/\{[\s\S]*\}/)?.[0] || cleaned;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonCandidate);
+  } catch {
+    throw new Error('Gemini returned an invalid rewrite payload');
+  }
+
+  const professional =
+    typeof (parsed as { professional?: unknown }).professional === 'string'
+      ? (parsed as { professional: string }).professional.trim()
+      : '';
+  const alternativeSource =
+    (parsed as { alternative?: unknown; alternate?: unknown; variation?: unknown }).alternative ??
+    (parsed as { alternate?: unknown }).alternate ??
+    (parsed as { variation?: unknown }).variation;
+  const alternative = typeof alternativeSource === 'string' ? alternativeSource.trim() : '';
+
+  if (!professional || !alternative) {
+    throw new Error('Gemini response is missing rewrite variants');
+  }
+
+  return {
+    professional,
+    alternative,
+  };
+}
+
+export async function rewriteMessageWithGemini(
+  input: RewriteMessageInput
+): Promise<RewriteMessageResult> {
+  const apiKey = getGeminiApiKey();
+  const model = getGeminiModel();
+  const baseUrl = getGeminiBaseUrl();
+  const timeoutMs = getTimeoutMs();
+
+  const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
+  const requestBody = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            text: buildPrompt(input.text),
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: getTemperature(),
+      topP: getTopP(),
+      maxOutputTokens: getMaxOutputTokens(),
+      candidateCount: 1,
+    },
+  };
+
+  log.info('Requesting Gemini rewrite', {
+    userId: input.userId,
+    conversationId: input.conversationId || null,
+    model,
+    inputLength: input.text.length,
+  });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
+    body: JSON.stringify(requestBody),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  const payload = (await response.json().catch(() => null)) as GeminiGenerateContentResponse | null;
+
+  if (!response.ok) {
+    const errorMessage =
+      payload?.error?.message ||
+      payload?.promptFeedback?.blockReason ||
+      `Gemini request failed with status ${response.status}`;
+
+    log.error('Gemini rewrite request failed', {
+      userId: input.userId,
+      conversationId: input.conversationId || null,
+      model,
+      status: response.status,
+      error: errorMessage,
+    });
+
+    throw new Error(errorMessage);
+  }
+
+  const rawText = payload ? extractCandidateText(payload) : '';
+  if (!rawText) {
+    throw new Error('Gemini returned an empty response');
+  }
+
+  const rewrites = parseRewriteResponse(rawText);
+
+  return {
+    ...rewrites,
+    model,
+  };
+}

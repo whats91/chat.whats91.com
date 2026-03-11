@@ -31,6 +31,7 @@ import type {
   UpdateConversationNotesResponse,
   UpdateConversationProfileImageResponse,
 } from '@/lib/types/chat';
+import type { RewriteMessageRequest, RewriteMessageResponse } from '@/lib/types/ai';
 
 const API_BASE = '/api';
 
@@ -227,6 +228,19 @@ export async function fetchMessageInfo(
       headers: getHeaders(),
     }
   );
+
+  return response.json();
+}
+
+export async function rewriteMessageDraft(
+  payload: RewriteMessageRequest
+): Promise<RewriteMessageResponse> {
+  const response = await fetch(`${API_BASE}/ai/rewrite`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
 
   return response.json();
 }

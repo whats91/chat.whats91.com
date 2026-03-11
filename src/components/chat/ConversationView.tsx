@@ -17,6 +17,7 @@ import { ConversationMediaDialog } from '@/components/chat/ConversationMediaDial
 import { MessageInfoDialog } from '@/components/chat/MessageInfoDialog';
 import { ConversationTargetPickerDialog } from '@/components/chat/ConversationTargetPickerDialog';
 import { MediaLightbox } from '@/components/chat/MediaLightbox';
+import { MessageRewritePopover } from '@/components/chat/MessageRewritePopover';
 import { TemplatePickerDialog } from '@/components/chat/TemplatePickerDialog';
 import { VoiceMessageButton } from '@/components/chat/VoiceMessageButton';
 import { cn } from '@/lib/utils';
@@ -1316,6 +1317,18 @@ function MessageComposer({
     mediaInputRef.current?.click();
   };
 
+  const applyRewrite = (value: string) => {
+    setMessage(value);
+    requestAnimationFrame(() => {
+      const input =
+        typeof window !== 'undefined' && window.innerWidth < 768
+          ? mobileMessageInputRef.current || desktopMessageInputRef.current
+          : desktopMessageInputRef.current || mobileMessageInputRef.current;
+      input?.focus();
+      input?.setSelectionRange(value.length, value.length);
+    });
+  };
+
   const reloadConversationState = async () => {
     await loadMessages(conversationId);
     await loadConversations();
@@ -1472,8 +1485,19 @@ function MessageComposer({
                   onKeyDown={handleKeyDown}
                   placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
                   disabled={isBlocked || isUploadingAttachment}
-                  className="h-10 rounded-full border-border/70 bg-input px-3 shadow-none"
+                  className="h-10 rounded-full border-border/70 bg-input px-3 pr-11 shadow-none"
                 />
+                <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                  <MessageRewritePopover
+                    text={message}
+                    conversationId={conversationId}
+                    disabled={isBlocked || isUploadingAttachment}
+                    onApply={applyRewrite}
+                    buttonClassName="h-8 w-8"
+                    iconClassName="h-4 w-4"
+                    contentClassName="max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto"
+                  />
+                </div>
               </div>
               <div className="flex w-10 flex-shrink-0 justify-end">
                 {!isBlocked && !isUploadingAttachment && message.trim() ? (
@@ -1526,17 +1550,26 @@ function MessageComposer({
                 onKeyDown={handleKeyDown}
                 placeholder={isBlocked ? 'Contact is blocked' : 'Type a message'}
                 disabled={isBlocked || isUploadingAttachment}
-                className="rounded-full border-border/70 bg-input pr-10 shadow-none"
+                className="rounded-full border-border/70 bg-input pr-18 shadow-none"
               />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                disabled={isBlocked || isUploadingAttachment}
-                onClick={handleOpenMediaPicker}
-              >
-                <ImageIcon className="h-4 w-4 text-muted-foreground" />
-              </Button>
+              <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                <MessageRewritePopover
+                  text={message}
+                  conversationId={conversationId}
+                  disabled={isBlocked || isUploadingAttachment}
+                  onApply={applyRewrite}
+                  contentClassName="max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={isBlocked || isUploadingAttachment}
+                  onClick={handleOpenMediaPicker}
+                >
+                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </div>
             </div>
             
             {!isBlocked && !isUploadingAttachment && message.trim() ? (
