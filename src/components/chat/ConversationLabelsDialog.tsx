@@ -136,8 +136,8 @@ export function ConversationLabelsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
-        <DialogHeader className="px-6 pt-6 pb-4">
+      <DialogContent className="flex h-[min(85vh,42rem)] w-[min(32rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-4">
           <DialogTitle>Manage labels</DialogTitle>
           <DialogDescription>
             Assign one or more labels to {conversationName}.
@@ -149,8 +149,8 @@ export function ConversationLabelsDialog({
           ) : null}
         </DialogHeader>
 
-        <div className="border-y border-border/70">
-          <ScrollArea className="max-h-[48vh] px-3 py-3">
+        <div className="min-h-0 flex-1 border-y border-border/70">
+          <ScrollArea className="h-full overscroll-contain px-3 py-3">
             {isLoading ? (
               <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -215,7 +215,7 @@ export function ConversationLabelsDialog({
           </ScrollArea>
         </div>
 
-        <DialogFooter className="px-6 py-4">
+        <DialogFooter className="shrink-0 px-6 py-4">
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
